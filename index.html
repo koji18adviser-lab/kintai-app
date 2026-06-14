@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="勤怠">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f1320">
+<title>勤怠管理</title>
+<style>
+  :root{
+    --bg:#0f1320; --card:#1a2030; --card2:#222a3d; --line:#2c3650;
+    --txt:#e8ecf5; --sub:#9aa6c2; --accent:#4f8cff; --accent2:#3a6fd8;
+    --green:#2ecc71; --red:#ff5d6c; --amber:#ffb648; --night:#8b6dff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+    background:var(--bg);color:var(--txt);font-size:15px;line-height:1.6;padding-bottom:60px;}
+  header{position:sticky;top:0;z-index:10;background:rgba(15,19,32,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top);}
+  .wrap{max-width:760px;margin:0 auto;padding:0 16px;}
+  h1{font-size:18px;margin:0;padding:14px 0;display:flex;align-items:center;gap:8px;}
+  h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--sub);}
+  h1 .dot.on{background:var(--green);box-shadow:0 0 0 4px rgba(46,204,113,.2);}
+  nav{display:flex;gap:4px;padding-bottom:8px;}
+  nav button{flex:1;background:transparent;border:none;color:var(--sub);font-size:13px;padding:8px 4px;
+    border-radius:8px;cursor:pointer;font-weight:600;}
+  nav button.active{background:var(--card2);color:var(--txt);}
+  section{display:none;padding:18px 0;}
+  section.active{display:block;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  .clock{font-size:38px;font-weight:700;text-align:center;letter-spacing:1px;font-variant-numeric:tabular-nums;}
+  .today-date{text-align:center;color:var(--sub);font-size:13px;margin-bottom:4px;}
+  .status{text-align:center;font-size:14px;margin:10px 0 4px;color:var(--sub);}
+  .status b{color:var(--green);}
+  .bigbtn{display:block;width:100%;border:none;border-radius:14px;padding:20px;font-size:20px;
+    font-weight:700;color:#fff;cursor:pointer;margin-top:12px;transition:transform .05s;}
+  .bigbtn:active{transform:scale(.98);}
+  .bigbtn.start{background:linear-gradient(135deg,#2ecc71,#27ae60);}
+  .bigbtn.stop{background:linear-gradient(135deg,#ff5d6c,#e84150);}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 14px;font-size:14px;
+    font-weight:600;cursor:pointer;}
+  .btn.sm{padding:6px 11px;font-size:13px;}
+  .btn.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line);}
+  .btn.danger{background:var(--red);}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .between{justify-content:space-between;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line);}
+  th{color:var(--sub);font-weight:600;font-size:12px;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+  .day-group{margin-bottom:10px;}
+  .day-head{display:flex;justify-content:space-between;align-items:center;padding:10px 6px;
+    background:var(--card2);border-radius:9px;margin-bottom:2px;font-weight:600;}
+  .day-head .meta{font-size:12px;color:var(--sub);font-weight:500;}
+  .sess{display:flex;align-items:center;gap:8px;padding:9px 6px;border-bottom:1px solid var(--line);font-size:14px;}
+  .sess .t{font-variant-numeric:tabular-nums;font-weight:600;}
+  .sess .dur{margin-left:auto;color:var(--sub);font-size:13px;}
+  .tag{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:700;}
+  .tag.night{background:rgba(139,109,255,.18);color:#b9a8ff;}
+  .tag.open{background:rgba(46,204,113,.18);color:#7ee2a8;}
+  label{display:block;font-size:13px;color:var(--sub);margin:12px 0 4px;font-weight:600;}
+  input,select{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:9px;padding:10px;font-size:15px;font-family:inherit;}
+  input[type=datetime-local]{font-variant-numeric:tabular-nums;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .stat{display:flex;justify-content:space-between;padding:10px 2px;border-bottom:1px solid var(--line);}
+  .stat:last-child{border-bottom:none;}
+  .stat .k{color:var(--sub);}
+  .stat .v{font-weight:700;font-variant-numeric:tabular-nums;}
+  .stat .v.hi{color:var(--amber);}
+  .stat .v.pay{color:var(--green);}
+  .hint{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.5;}
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
+    align-items:center;justify-content:center;padding:16px;}
+  .modal-bg.show{display:flex;}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;
+    width:100%;max-width:420px;max-height:90vh;overflow:auto;}
+  .modal h3{margin:0 0 4px;}
+  .sectitle{font-size:13px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    margin:4px 0 8px;}
+  .mono{font-variant-numeric:tabular-nums;}
+  .empty{text-align:center;color:var(--sub);padding:30px 0;font-size:14px;}
+  .monthnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .monthnav button{background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    width:40px;height:40px;border-radius:10px;font-size:18px;cursor:pointer;}
+  .monthnav .cur{font-size:17px;font-weight:700;}
+  .banner{background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#bcd2ff;
+    border-radius:10px;padding:11px 13px;font-size:13px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1><span class="dot" id="liveDot"></span>勤怠管理</h1>
+  <nav>
+    <button data-tab="punch" class="active">打刻</button>
+    <button data-tab="records">記録・修正</button>
+    <button data-tab="report">集計・残業</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+</div></header>
+
+<main class="wrap">
+  <!-- 打刻 -->
+  <section id="punch" class="active">
+    <div class="card">
+      <div class="today-date" id="todayDate"></div>
+      <div class="clock" id="liveClock">--:--:--</div>
+      <div class="status" id="punchStatus"></div>
+      <button class="bigbtn start" id="mainBtn">勤務開始</button>
+      <div class="hint" style="text-align:center;margin-top:10px;">
+        フレックス対応：1日に何度でも開始／終了できます。休憩のたびに「終了」、戻ったら「開始」でOK。
+      </div>
+    </div>
+    <div class="card">
+      <div class="row between"><b>今日の打刻</b><span class="meta" id="todayTotal" style="color:var(--sub);font-size:13px;"></span></div>
+      <div id="todaySessions"></div>
+    </div>
+  </section>
+
+  <!-- 記録・修正 -->
+  <section id="records">
+    <div class="row between" style="margin-bottom:12px;">
+      <b>勤務記録</b>
+      <button class="btn sm" id="addManual">＋ 手動で追加</button>
+    </div>
+    <div class="hint" style="margin-bottom:12px;">押しミスの修正：各勤務をタップで時間を直す・削除できます。打ち忘れは「手動で追加」から。</div>
+    <div id="recordsList"></div>
+  </section>
+
+  <!-- 集計 -->
+  <section id="report">
+    <div class="monthnav">
+      <button id="prevMonth">‹</button>
+      <span class="cur" id="curMonth"></span>
+      <button id="nextMonth">›</button>
+    </div>
+    <div class="banner" id="contractBanner"></div>
+    <div class="card">
+      <div class="sectitle">月間サマリー</div>
+      <div id="monthSummary"></div>
+    </div>
+    <div class="card">
+      <div class="sectitle">日別内訳</div>
+      <div style="overflow-x:auto"><table id="dailyTable"></table></div>
+    </div>
+    <button class="btn ghost" id="exportCsv" style="width:100%">CSVで書き出す</button>
+  </section>
+
+  <!-- 設定 -->
+  <section id="settings">
+    <div class="banner">初回だけ、お手元の雇用契約書を見ながら金額を入力してください。入力した内容はこの端末に自動保存され、次回からは不要です（公開URLには金額は一切保存されません）。</div>
+    <div class="card">
+      <div class="sectitle">給与</div>
+      <label>月給総額（円）</label>
+      <input type="number" id="s_gross" placeholder="月給の総額">
+      <label>残業の基礎時給（円）</label>
+      <input type="number" step="0.01" id="s_wage" placeholder="割増計算の基礎となる時給">
+      <div class="hint">割増の基礎となる時給。＝定額残業手当 ÷ みなし残業時間 ÷ 残業割増率 で求められます（定額深夜手当 ÷ みなし深夜 ÷ 深夜割増率 でも一致するはず）。</div>
+    </div>
+    <div class="card">
+      <div class="sectitle">割増率</div>
+      <div class="grid2">
+        <div><label>残業 60h以内（倍）</label><input type="number" step="0.01" id="s_otRate" placeholder="1.25"></div>
+        <div><label>残業 60h超（倍）</label><input type="number" step="0.01" id="s_otRate2" placeholder="1.5"></div>
+      </div>
+      <label>深夜の割増（加算分）</label>
+      <input type="number" step="0.01" id="s_nightRate" placeholder="0.25">
+      <div class="hint">一般的な法定の目安：深夜+25%（=0.25）、法定時間外 60h以内125%（=1.25）／60h超150%（=1.5）。契約書の割増賃金率の欄に従ってください。</div>
+    </div>
+    <div class="card">
+      <div class="sectitle">所定（残業の基準）・みなし時間</div>
+      <label>週の法定労働時間（h）</label>
+      <input type="number" step="0.1" id="s_weeklyStd" placeholder="40">
+      <div class="hint">フレックスのため、月の基準は「週法定時間 × 暦日数 ÷ 7」で毎月自動計算します（例：30日の月＝約171.4h）。この時間を超えた分が残業です。</div>
+      <label>所定労働時間を手動で固定する（h・任意）</label>
+      <input type="number" step="0.1" id="s_monthlyStd" placeholder="空欄＝自動計算">
+      <div class="hint">会社が月ごと定額の所定時間を指定している場合のみ入力。空欄なら上の自動計算を使います。</div>
+      <div class="grid2">
+        <div><label>みなし残業 /月（h）</label><input type="number" step="0.1" id="s_fixedOt" placeholder="定額残業の時間"></div>
+        <div><label>みなし深夜 /月（h）</label><input type="number" step="0.1" id="s_fixedNight" placeholder="定額深夜の時間"></div>
+      </div>
+      <div class="hint">定額残業手当・定額深夜労働手当に相当する時間が給与に込み。実績がこれを超えた分だけ追加支給されます。契約書の該当時間を入力してください。</div>
+    </div>
+    <div class="card">
+      <div class="sectitle">深夜時間帯</div>
+      <div class="grid2">
+        <div><label>開始</label><input type="number" id="s_nightStart" placeholder="22"></div>
+        <div><label>終了（翌）</label><input type="number" id="s_nightEnd" placeholder="5"></div>
+      </div>
+      <div class="hint">この時間帯にかかった勤務を深夜として集計します（標準は22時〜翌5時）。</div>
+    </div>
+    <button class="btn" id="saveSettings" style="width:100%">設定を保存</button>
+    <div class="card" style="margin-top:14px;">
+      <div class="sectitle">データ</div>
+      <div class="row">
+        <button class="btn ghost sm" id="exportData">バックアップ書き出し</button>
+        <button class="btn ghost sm" id="importData">読み込み</button>
+        <button class="btn danger sm" id="clearData">全消去</button>
+      </div>
+      <div class="hint">データはこの端末のブラウザ内にのみ保存されます。機種変更前はバックアップを取ってください。</div>
+    </div>
+  </section>
+</main>
+
+<!-- 編集モーダル -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h3 id="modalTitle">勤務を編集</h3>
+    <label>開始</label>
+    <input type="datetime-local" id="m_start">
+    <label>終了（勤務中の場合は空のまま）</label>
+    <input type="datetime-local" id="m_end">
+    <div class="row" style="margin-top:18px;">
+      <button class="btn" id="m_save" style="flex:1">保存</button>
+      <button class="btn ghost" id="m_clearEnd">終了を空に</button>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn danger" id="m_delete" style="flex:1">この勤務を削除</button>
+      <button class="btn ghost" id="m_cancel" style="flex:1">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const LS_SESS="kintai_sessions_v1", LS_SET="kintai_settings_v1";
+const $=id=>document.getElementById(id);
+
+// ---------- データ ----------
+let sessions = load(LS_SESS, []);   // [{id, start(ISO), end(ISO|null)}]
+let settings = Object.assign({
+  gross:0, wage:0, otRate:1.25, otRate2:1.5, nightRate:0.25,
+  weeklyStd:40, monthlyStd:0, fixedOt:0, fixedNight:0,
+  nightStart:22, nightEnd:5
+}, load(LS_SET, {}));
+let viewMonth = new Date(); viewMonth.setDate(1);
+
+let storageOK=true;
+function load(k,def){ try{return JSON.parse(localStorage.getItem(k))??def;}catch(e){return def;} }
+function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }
+  catch(e){ if(storageOK){ storageOK=false; showStorageWarn(); } } }
+function showStorageWarn(){
+  let el=document.getElementById("storageWarn");
+  if(!el){ el=document.createElement("div"); el.id="storageWarn";
+    el.style.cssText="position:fixed;left:0;right:0;bottom:0;z-index:99;background:#ffb648;color:#1a1a1a;"+
+      "padding:9px 14px;font-size:12px;text-align:center;font-weight:600;line-height:1.4;";
+    el.innerHTML="⚠ このブラウザでは自動保存ができません（ファイルを直接開いた場合に多い）。動作はしますが、再読み込みで記録が消えます。Chromeで開くか、設定→バックアップ書き出しで保存してください。";
+    document.body.appendChild(el); }
+}
+function saveSessions(){ save(LS_SESS,sessions); }
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+// ---------- 時刻ユーティリティ ----------
+const pad=n=>String(n).padStart(2,"0");
+function toLocalInput(iso){ if(!iso)return ""; const d=new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fromLocalInput(v){ return v? new Date(v).toISOString() : null; }
+function hhmm(iso){ const d=new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function dayKey(iso){ const d=new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function fmtH(min){ const h=Math.floor(Math.abs(min)/60), m=Math.round(Math.abs(min)%60);
+  return `${min<0?"-":""}${h}:${pad(m)}`; }
+function fmtHdec(min){ return (min/60).toFixed(2)+"h"; }
+const WD=["日","月","火","水","木","金","土"];
+function dateLabel(key){ const d=new Date(key+"T00:00"); return `${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`; }
+function yen(n){ return "¥"+Math.round(n).toLocaleString("ja-JP"); }
+
+// 勤務時間(分)
+function durMin(s){ if(!s.end)return 0; return (new Date(s.end)-new Date(s.start))/60000; }
+
+// 区間と深夜帯の重なり(分)。深夜帯が日をまたぐ場合も対応
+function nightMin(s){
+  if(!s.end)return 0;
+  let start=new Date(s.start), end=new Date(s.end);
+  let total=0;
+  // 1日ずつスキャン（開始日の前日から終了日まで）窓を生成
+  const ns=settings.nightStart, ne=settings.nightEnd;
+  let cursor=new Date(start); cursor.setHours(0,0,0,0); cursor.setDate(cursor.getDate()-1);
+  const limit=new Date(end); limit.setHours(0,0,0,0); limit.setDate(limit.getDate()+1);
+  while(cursor<=limit){
+    // その日の深夜窓: [ns:00, 翌ne:00]  (例 22:00〜翌5:00)
+    const w1=new Date(cursor); w1.setHours(ns,0,0,0);
+    const w2=new Date(cursor); w2.setDate(w2.getDate()+1); w2.setHours(ne,0,0,0);
+    const a=Math.max(start, w1), b=Math.min(end, w2);
+    if(b>a) total+=(b-a)/60000;
+    cursor.setDate(cursor.getDate()+1);
+  }
+  return total;
+}
+
+function openSession(){ return sessions.find(s=>!s.end); }
+
+// ---------- 打刻 ----------
+function tickClock(){
+  const d=new Date();
+  $("liveClock").textContent=`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  $("todayDate").textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 (${WD[d.getDay()]})`;
+}
+function renderPunch(){
+  const open=openSession();
+  const dot=$("liveDot"), btn=$("mainBtn"), st=$("punchStatus");
+  if(open){
+    dot.classList.add("on");
+    btn.className="bigbtn stop"; btn.textContent="勤務終了";
+    st.innerHTML=`<b>勤務中</b>（${hhmm(open.start)} 開始）`;
+  }else{
+    dot.classList.remove("on");
+    btn.className="bigbtn start"; btn.textContent="勤務開始";
+    st.textContent="現在は勤務外です";
+  }
+  // 今日の打刻
+  const tk=dayKey(new Date().toISOString());
+  const todays=sessions.filter(s=>dayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
+  const box=$("todaySessions");
+  if(!todays.length){ box.innerHTML=`<div class="empty">まだ打刻がありません</div>`; $("todayTotal").textContent=""; return; }
+  let tot=0;
+  box.innerHTML=todays.map(s=>{
+    tot+=durMin(s);
+    const nm=nightMin(s);
+    return `<div class="sess">
+      <span class="t">${hhmm(s.start)}</span><span style="color:var(--sub)">→</span>
+      <span class="t">${s.end?hhmm(s.end):'<span class="tag open">勤務中</span>'}</span>
+      ${nm>0?`<span class="tag night">深夜${fmtH(nm)}</span>`:""}
+      <span class="dur">${s.end?fmtH(durMin(s)):""}</span></div>`;
+  }).join("");
+  $("todayTotal").textContent=`合計 ${fmtH(tot)}`;
+}
+$("mainBtn").onclick=()=>{
+  const open=openSession();
+  if(open){ open.end=new Date().toISOString(); }
+  else{ sessions.push({id:uid(), start:new Date().toISOString(), end:null}); }
+  saveSessions(); renderAll();
+};
+
+// ---------- 記録・修正 ----------
+function groupByDay(list){
+  const m={};
+  list.forEach(s=>{ const k=dayKey(s.start); (m[k]=m[k]||[]).push(s); });
+  return Object.keys(m).sort((a,b)=>b<a?-1:1).map(k=>({key:k, items:m[k].sort((a,b)=>new Date(a.start)-new Date(b.start))}));
+}
+function renderRecords(){
+  const box=$("recordsList");
+  if(!sessions.length){ box.innerHTML=`<div class="empty">記録がありません</div>`; return; }
+  box.innerHTML=groupByDay(sessions).map(g=>{
+    let tot=0,nt=0; g.items.forEach(s=>{tot+=durMin(s);nt+=nightMin(s);});
+    const rows=g.items.map(s=>`<div class="sess" data-id="${s.id}" style="cursor:pointer">
+        <span class="t">${hhmm(s.start)}</span><span style="color:var(--sub)">→</span>
+        <span class="t">${s.end?hhmm(s.end):'<span class="tag open">勤務中</span>'}</span>
+        ${nightMin(s)>0?`<span class="tag night">深夜</span>`:""}
+        <span class="dur">${s.end?fmtH(durMin(s)):""} ✎</span></div>`).join("");
+    return `<div class="card day-group">
+      <div class="day-head">${dateLabel(g.key)}
+        <span class="meta">勤務 ${fmtH(tot)}${nt>0?` / 深夜 ${fmtH(nt)}`:""}</span></div>
+      ${rows}</div>`;
+  }).join("");
+  box.querySelectorAll(".sess[data-id]").forEach(el=>el.onclick=()=>openModal(el.dataset.id));
+}
+
+// ---------- モーダル（編集・追加） ----------
+let editingId=null;
+function openModal(id){
+  editingId=id;
+  const s=id?sessions.find(x=>x.id===id):null;
+  $("modalTitle").textContent=id?"勤務を編集":"勤務を手動で追加";
+  if(s){ $("m_start").value=toLocalInput(s.start); $("m_end").value=toLocalInput(s.end); }
+  else{
+    const now=new Date(); now.setSeconds(0,0);
+    $("m_start").value=toLocalInput(now.toISOString());
+    $("m_end").value="";
+  }
+  $("m_delete").style.display=id?"block":"none";
+  $("modal").classList.add("show");
+}
+function closeModal(){ $("modal").classList.remove("show"); editingId=null; }
+$("m_cancel").onclick=closeModal;
+$("modal").onclick=e=>{ if(e.target===$("modal")) closeModal(); };
+$("m_clearEnd").onclick=()=>{ $("m_end").value=""; };
+$("addManual").onclick=()=>openModal(null);
+$("m_save").onclick=()=>{
+  const start=fromLocalInput($("m_start").value);
+  const end=fromLocalInput($("m_end").value);
+  if(!start){ alert("開始時刻を入力してください"); return; }
+  if(end && new Date(end)<=new Date(start)){ alert("終了は開始より後にしてください"); return; }
+  if(editingId){ const s=sessions.find(x=>x.id===editingId); s.start=start; s.end=end; }
+  else{ sessions.push({id:uid(),start,end}); }
+  saveSessions(); closeModal(); renderAll();
+};
+$("m_delete").onclick=()=>{
+  if(!editingId)return;
+  if(confirm("この勤務記録を削除しますか？")){
+    sessions=sessions.filter(x=>x.id!==editingId); saveSessions(); closeModal(); renderAll();
+  }
+};
+
+// ---------- 集計 ----------
+function monthKey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
+function renderReport(){
+  $("curMonth").textContent=`${viewMonth.getFullYear()}年 ${viewMonth.getMonth()+1}月`;
+  const mk=monthKey(viewMonth);
+  const inMonth=sessions.filter(s=>monthKey(new Date(s.start))===mk && s.end);
+
+  // 日別
+  const days={};
+  inMonth.forEach(s=>{ const k=dayKey(s.start);
+    days[k]=days[k]||{work:0,night:0}; days[k].work+=durMin(s); days[k].night+=nightMin(s); });
+  const dkeys=Object.keys(days).sort();
+
+  let totWork=0, totNight=0;
+  dkeys.forEach(k=>{ totWork+=days[k].work; totNight+=days[k].night; });
+  const workH=totWork/60, nightH=totNight/60;
+
+  // フレックスの残業基準：月の法定総枠 = 週法定 × 暦日数 ÷ 7（手動固定があればそれを優先）
+  const daysInMonth=new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 0).getDate();
+  const capH = settings.monthlyStd>0 ? settings.monthlyStd : settings.weeklyStd*daysInMonth/7;
+
+  const otH=Math.max(0, workH-capH);                       // 法定時間外（残業）合計
+  // みなし45h超〜60hは125%、60h超は150%
+  const fOt=settings.fixedOt;
+  const otPaid125=Math.max(0, Math.min(otH,60)-fOt);       // みなし超〜60hまで
+  const otPaid150=Math.max(0, otH-Math.max(60,fOt));       // 60h超
+  const extraOtH=otPaid125+otPaid150;
+
+  const extraNightH=Math.max(0, nightH-settings.fixedNight);
+
+  const w=settings.wage;
+  const otPay = (otPaid125*w*settings.otRate)+(otPaid150*w*settings.otRate2);
+  const nightPay = extraNightH * w * settings.nightRate;
+  const totalExtra = otPay+nightPay;
+
+  $("contractBanner").innerHTML = w>0
+    ? `基礎時給 ${yen(w)}／所定(法定総枠) ${capH.toFixed(1)}h（${daysInMonth}日）／みなし残業 ${fOt}h・みなし深夜 ${settings.fixedNight}h で計算中。`
+    : `⚠ まず「設定」タブで契約書の金額（月給・基礎時給・みなし時間）を入力すると、残業代・深夜割増が自動計算されます。`;
+
+  const hh=h=>fmtH(h*60);
+  $("monthSummary").innerHTML=`
+    <div class="stat"><span class="k">総労働時間</span><span class="v">${hh(workH)} <span style="color:var(--sub);font-weight:400">(${workH.toFixed(2)}h)</span></span></div>
+    <div class="stat"><span class="k">所定労働時間（法定総枠）</span><span class="v">${hh(capH)}</span></div>
+    <div class="stat"><span class="k">残業時間（法定時間外 合計）</span><span class="v hi">${hh(otH)}</span></div>
+    <div class="stat"><span class="k">　うち みなし残業内（込み）</span><span class="v">${hh(Math.min(otH,fOt))}</span></div>
+    <div class="stat"><span class="k">　うち 追加支給 ≤60h（×${settings.otRate}）</span><span class="v hi">${hh(otPaid125)}</span></div>
+    <div class="stat"><span class="k">　うち 追加支給 60h超（×${settings.otRate2}）</span><span class="v hi">${hh(otPaid150)}</span></div>
+    <div class="stat"><span class="k">深夜労働時間</span><span class="v" style="color:var(--night)">${hh(nightH)}</span></div>
+    <div class="stat"><span class="k">　うち みなし深夜内（込み）</span><span class="v">${hh(Math.min(nightH,settings.fixedNight))}</span></div>
+    <div class="stat"><span class="k">　うち 追加支給（＋${Math.round(settings.nightRate*100)}%）</span><span class="v hi">${hh(extraNightH)}</span></div>
+    <div class="stat"><span class="k">残業代（追加分）</span><span class="v pay">${yen(otPay)}</span></div>
+    <div class="stat"><span class="k">深夜割増（追加分）</span><span class="v pay">${yen(nightPay)}</span></div>
+    <div class="stat"><span class="k" style="font-weight:700">追加支給 合計</span><span class="v pay" style="font-size:17px">${yen(totalExtra)}</span></div>
+    <div class="stat"><span class="k" style="font-weight:700">想定総支給（月給＋追加）</span><span class="v pay" style="font-size:17px">${yen(settings.gross+totalExtra)}</span></div>`;
+
+  // 日別テーブル
+  const t=$("dailyTable");
+  if(!dkeys.length){ t.innerHTML=`<tr><td class="empty">この月の記録はありません</td></tr>`; }
+  else{
+    t.innerHTML=`<tr><th>日付</th><th class="num">勤務</th><th class="num">深夜</th></tr>`+
+      dkeys.map(k=>`<tr><td>${dateLabel(k)}</td><td class="num">${fmtH(days[k].work)}</td>
+        <td class="num" style="color:var(--night)">${days[k].night>0?fmtH(days[k].night):"-"}</td></tr>`).join("");
+  }
+}
+$("prevMonth").onclick=()=>{ viewMonth.setMonth(viewMonth.getMonth()-1); renderReport(); };
+$("nextMonth").onclick=()=>{ viewMonth.setMonth(viewMonth.getMonth()+1); renderReport(); };
+
+$("exportCsv").onclick=()=>{
+  const mk=monthKey(viewMonth);
+  const rows=[["日付","開始","終了","勤務(時:分)","深夜(時:分)"]];
+  sessions.filter(s=>monthKey(new Date(s.start))===mk).sort((a,b)=>new Date(a.start)-new Date(b.start))
+    .forEach(s=>rows.push([dayKey(s.start),hhmm(s.start),s.end?hhmm(s.end):"",s.end?fmtH(durMin(s)):"",fmtH(nightMin(s))]));
+  const csv="\uFEFF"+rows.map(r=>r.join(",")).join("\n");
+  downloadFile(`勤怠_${mk}.csv`, csv, "text/csv");
+};
+
+// ---------- 設定 ----------
+function fillSettings(){
+  $("s_gross").value=settings.gross||"";
+  $("s_wage").value=settings.wage||"";
+  $("s_otRate").value=settings.otRate;
+  $("s_otRate2").value=settings.otRate2;
+  $("s_nightRate").value=settings.nightRate;
+  $("s_weeklyStd").value=settings.weeklyStd;
+  $("s_monthlyStd").value=settings.monthlyStd||"";
+  $("s_fixedOt").value=settings.fixedOt;
+  $("s_fixedNight").value=settings.fixedNight;
+  $("s_nightStart").value=settings.nightStart;
+  $("s_nightEnd").value=settings.nightEnd;
+}
+$("saveSettings").onclick=()=>{
+  settings={ gross:+$("s_gross").value||0, wage:+$("s_wage").value||0,
+    otRate:+$("s_otRate").value||1.25, otRate2:+$("s_otRate2").value||1.5,
+    nightRate:+$("s_nightRate").value||0.25, weeklyStd:+$("s_weeklyStd").value||40,
+    monthlyStd:+$("s_monthlyStd").value||0,
+    fixedOt:+$("s_fixedOt").value||0, fixedNight:+$("s_fixedNight").value||0,
+    nightStart:+$("s_nightStart").value||22, nightEnd:+$("s_nightEnd").value||5 };
+  save(LS_SET,settings); renderAll(); alert("設定を保存しました");
+};
+function downloadFile(name,content,type){
+  const b=new Blob([content],{type}); const u=URL.createObjectURL(b);
+  const a=document.createElement("a"); a.href=u; a.download=name; a.click(); URL.revokeObjectURL(u);
+}
+$("exportData").onclick=()=>downloadFile("勤怠バックアップ.json",
+  JSON.stringify({sessions,settings},null,2),"application/json");
+$("importData").onclick=()=>{
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".json";
+  inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader();
+    r.onload=()=>{ try{ const d=JSON.parse(r.result);
+      if(d.sessions)sessions=d.sessions; if(d.settings)settings=Object.assign(settings,d.settings);
+      saveSessions(); save(LS_SET,settings); fillSettings(); renderAll(); alert("読み込みました");
+    }catch(err){ alert("ファイルを読み込めませんでした"); } }; r.readAsText(f); };
+  inp.click();
+};
+$("clearData").onclick=()=>{
+  if(confirm("すべての勤怠データと設定を削除します。よろしいですか？")){
+    if(confirm("本当に削除しますか？（元に戻せません）")){
+      sessions=[]; saveSessions(); renderAll();
+    }
+  }
+};
+
+// ---------- タブ ----------
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll("section").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active"); $(b.dataset.tab).classList.add("active");
+});
+
+// ---------- 描画 ----------
+function renderAll(){ renderPunch(); renderRecords(); renderReport(); }
+fillSettings(); renderAll(); tickClock(); setInterval(tickClock,1000);
+</script>
+</body>
+</html>
