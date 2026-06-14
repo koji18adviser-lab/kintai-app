@@ -46,6 +46,10 @@
     margin-top:10px;transition:transform .05s;}
   .subbtn:active{transform:scale(.98);}
   .tag.break{background:rgba(255,182,72,.18);color:#ffce8a;}
+  .seg{display:flex;gap:0;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+  .seg button{flex:1;background:var(--card2);color:var(--sub);border:none;padding:10px;font-size:14px;
+    font-weight:700;cursor:pointer;font-family:inherit;}
+  .seg button.seg-on{background:var(--accent);color:#fff;}
   .btn{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 14px;font-size:14px;
     font-weight:600;cursor:pointer;}
   .btn.sm{padding:6px 11px;font-size:13px;}
@@ -131,9 +135,12 @@
   <section id="records">
     <div class="row between" style="margin-bottom:12px;">
       <b>勤務記録</b>
-      <button class="btn sm" id="addManual">＋ 手動で追加</button>
+      <div class="row">
+        <button class="btn sm" id="addManual">＋ 勤務を追加</button>
+        <button class="btn sm ghost" id="addBreak">＋ 休憩を追加</button>
+      </div>
     </div>
-    <div class="hint" style="margin-bottom:12px;">押しミスの修正：各勤務をタップで時間を直す・削除できます。打ち忘れは「手動で追加」から。</div>
+    <div class="hint" style="margin-bottom:12px;">押しミスの修正：各記録をタップで時間・種別を直す・削除できます。打ち忘れた勤務や休憩はここから後追加できます。</div>
     <div id="recordsList"></div>
   </section>
 
@@ -200,6 +207,28 @@
       <div class="hint">この時間帯にかかった勤務を深夜として集計します（標準は22時〜翌5時）。</div>
     </div>
     <button class="btn" id="saveSettings" style="width:100%">設定を保存</button>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="sectitle">クラウド同期（スマホ⇔PC）</div>
+      <div class="hint" style="margin-top:0">スマホとPCで同じ「同期ID」と「合言葉」を入れると記録が同期されます。データは合言葉で暗号化してから保存されるため、サーバー運営者でも中身は読めません。</div>
+      <label>同期ID（自分で決める・両端末で同じ文字列）</label>
+      <input type="text" id="y_id" placeholder="例: toya-kintai-2026" autocomplete="off">
+      <label>合言葉（パスフレーズ・両端末で同じもの）</label>
+      <input type="password" id="y_pass" placeholder="長めの覚えやすい文" autocomplete="new-password">
+      <div class="hint">⚠ 合言葉を忘れると同期データは復元できません（サーバー側も読めないため）。メモを残してください。</div>
+      <label>Firebase設定（databaseURL）</label>
+      <input type="text" id="y_db" placeholder="https://〇〇.firebaseio.com" autocomplete="off">
+      <div class="hint">後述の手順でFirebaseのRealtime DatabaseのURLを貼り付けます。</div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="y_save" style="flex:1">同期を有効にして今すぐ同期</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn ghost sm" id="y_now">手動で同期</button>
+        <button class="btn ghost sm" id="y_off">同期を停止</button>
+      </div>
+      <div class="hint" id="y_status" style="margin-top:10px;font-weight:600;"></div>
+    </div>
+
     <div class="card" style="margin-top:14px;">
       <div class="sectitle">データ</div>
       <div class="row">
@@ -216,6 +245,8 @@
 <div class="modal-bg" id="modal">
   <div class="modal">
     <h3 id="modalTitle">勤務を編集</h3>
+    <label>種別</label>
+    <div class="seg"><button type="button" id="m_typeWork" class="seg-on">勤務</button><button type="button" id="m_typeBreak">休憩</button></div>
     <label>開始</label>
     <input type="datetime-local" id="m_start">
     <label>終了（勤務中の場合は空のまま）</label>
@@ -257,8 +288,15 @@ function showStorageWarn(){
     el.innerHTML="⚠ このブラウザでは自動保存ができません（ファイルを直接開いた場合に多い）。動作はしますが、再読み込みで記録が消えます。Chromeで開くか、設定→バックアップ書き出しで保存してください。";
     document.body.appendChild(el); }
 }
-function saveSessions(){ save(LS_SESS,sessions); }
+function saveSessions(){ save(LS_SESS,sessions); scheduleSync(); }
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const nowMs=()=>Date.now();
+// 表示・集計に使う有効なセッション（削除済みtombstoneは除外）
+function liveSessions(){ return sessions.filter(s=>!s.del); }
+// 新規セッション（同期用に更新時刻modを付与）
+function newSess(o){ return Object.assign({id:uid(), mod:nowMs()}, o); }
+// 既存を変更したら更新時刻を打つ
+function touch(s){ s.mod=nowMs(); }
 
 // ---------- 時刻ユーティリティ ----------
 const pad=n=>String(n).padStart(2,"0");
@@ -297,7 +335,7 @@ function nightMin(s){
   return total;
 }
 
-function openSession(){ return sessions.find(s=>!s.end); }
+function openSession(){ return liveSessions().find(s=>!s.end); }
 function isBreak(s){ return s.type==="break"; }
 
 // ---------- 打刻 ----------
@@ -330,7 +368,7 @@ function renderPunch(){
   }
   // 今日の打刻
   const tk=dayKey(new Date().toISOString());
-  const todays=sessions.filter(s=>dayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
+  const todays=liveSessions().filter(s=>dayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
   const box=$("todaySessions");
   if(!todays.length){ box.innerHTML=`<div class="empty">まだ打刻がありません</div>`; $("todayTotal").textContent=""; return; }
   let tot=0, brk=0;
@@ -352,12 +390,12 @@ $("mainBtn").onclick=()=>{
   const open=openSession();
   const now=new Date().toISOString();
   if(open && isBreak(open)){
-    open.end=now;                                    // 休憩を終了し
-    sessions.push({id:uid(), start:now, end:null});  // 勤務を自動再開
+    open.end=now; touch(open);                       // 休憩を終了し
+    sessions.push(newSess({start:now, end:null}));   // 勤務を自動再開
   }else if(open){
-    open.end=now;                                    // 勤務終了
+    open.end=now; touch(open);                       // 勤務終了
   }else{
-    sessions.push({id:uid(), start:now, end:null});  // 勤務開始
+    sessions.push(newSess({start:now, end:null}));   // 勤務開始
   }
   saveSessions(); renderAll();
 };
@@ -365,8 +403,8 @@ $("breakBtn").onclick=()=>{
   const open=openSession();
   if(open && !isBreak(open)){
     const now=new Date().toISOString();
-    open.end=now;                                   // 勤務をいったん終了
-    sessions.push({id:uid(), start:now, end:null, type:"break"}); // 休憩開始
+    open.end=now; touch(open);                      // 勤務をいったん終了
+    sessions.push(newSess({start:now, end:null, type:"break"})); // 休憩開始
     saveSessions(); renderAll();
   }
 };
@@ -379,8 +417,8 @@ function groupByDay(list){
 }
 function renderRecords(){
   const box=$("recordsList");
-  if(!sessions.length){ box.innerHTML=`<div class="empty">記録がありません</div>`; return; }
-  box.innerHTML=groupByDay(sessions).map(g=>{
+  if(!liveSessions().length){ box.innerHTML=`<div class="empty">記録がありません</div>`; return; }
+  box.innerHTML=groupByDay(liveSessions()).map(g=>{
     let tot=0,nt=0,brk=0; g.items.forEach(s=>{ if(isBreak(s)){brk+=durMin(s);} else {tot+=durMin(s);nt+=nightMin(s);} });
     const rows=g.items.map(s=>{ const br=isBreak(s);
       return `<div class="sess" data-id="${s.id}" style="cursor:pointer">
@@ -398,11 +436,19 @@ function renderRecords(){
 }
 
 // ---------- モーダル（編集・追加） ----------
-let editingId=null;
-function openModal(id){
+let editingId=null, editType="work";
+function setType(t){ editType=t;
+  $("m_typeWork").classList.toggle("seg-on", t==="work");
+  $("m_typeBreak").classList.toggle("seg-on", t==="break");
+}
+$("m_typeWork").onclick=()=>setType("work");
+$("m_typeBreak").onclick=()=>setType("break");
+function openModal(id, newType){
   editingId=id;
   const s=id?sessions.find(x=>x.id===id):null;
-  $("modalTitle").textContent = s&&isBreak(s) ? "休憩を編集" : (id?"勤務を編集":"勤務を手動で追加");
+  setType(s ? (isBreak(s)?"break":"work") : (newType||"work"));
+  $("modalTitle").textContent = id ? (isBreak(s)?"休憩を編集":"勤務を編集")
+    : (editType==="break"?"休憩を手動で追加":"勤務を手動で追加");
   if(s){ $("m_start").value=toLocalInput(s.start); $("m_end").value=toLocalInput(s.end); }
   else{
     const now=new Date(); now.setSeconds(0,0);
@@ -416,20 +462,24 @@ function closeModal(){ $("modal").classList.remove("show"); editingId=null; }
 $("m_cancel").onclick=closeModal;
 $("modal").onclick=e=>{ if(e.target===$("modal")) closeModal(); };
 $("m_clearEnd").onclick=()=>{ $("m_end").value=""; };
-$("addManual").onclick=()=>openModal(null);
+$("addManual").onclick=()=>openModal(null,"work");
+$("addBreak").onclick=()=>openModal(null,"break");
 $("m_save").onclick=()=>{
   const start=fromLocalInput($("m_start").value);
   const end=fromLocalInput($("m_end").value);
   if(!start){ alert("開始時刻を入力してください"); return; }
   if(end && new Date(end)<=new Date(start)){ alert("終了は開始より後にしてください"); return; }
-  if(editingId){ const s=sessions.find(x=>x.id===editingId); s.start=start; s.end=end; }
-  else{ sessions.push({id:uid(),start,end}); }
+  if(editingId){ const s=sessions.find(x=>x.id===editingId); s.start=start; s.end=end;
+    if(editType==="break") s.type="break"; else delete s.type; touch(s); }
+  else{ const o=newSess({start,end}); if(editType==="break") o.type="break"; sessions.push(o); }
   saveSessions(); closeModal(); renderAll();
 };
 $("m_delete").onclick=()=>{
   if(!editingId)return;
-  if(confirm("この勤務記録を削除しますか？")){
-    sessions=sessions.filter(x=>x.id!==editingId); saveSessions(); closeModal(); renderAll();
+  if(confirm("この記録を削除しますか？")){
+    const s=sessions.find(x=>x.id===editingId);
+    if(s){ s.del=true; touch(s); }                  // 同期のため即削除せずtombstone化
+    saveSessions(); closeModal(); renderAll();
   }
 };
 
@@ -438,7 +488,7 @@ function monthKey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
 function renderReport(){
   $("curMonth").textContent=`${viewMonth.getFullYear()}年 ${viewMonth.getMonth()+1}月`;
   const mk=monthKey(viewMonth);
-  const inMonth=sessions.filter(s=>monthKey(new Date(s.start))===mk && s.end && !isBreak(s));
+  const inMonth=liveSessions().filter(s=>monthKey(new Date(s.start))===mk && s.end && !isBreak(s));
 
   // 日別（休憩は勤務・深夜に含めない）
   const days={};
@@ -503,7 +553,7 @@ $("nextMonth").onclick=()=>{ viewMonth.setMonth(viewMonth.getMonth()+1); renderR
 $("exportCsv").onclick=()=>{
   const mk=monthKey(viewMonth);
   const rows=[["日付","種別","開始","終了","勤務(時:分)","深夜(時:分)","休憩(時:分)"]];
-  sessions.filter(s=>monthKey(new Date(s.start))===mk).sort((a,b)=>new Date(a.start)-new Date(b.start))
+  liveSessions().filter(s=>monthKey(new Date(s.start))===mk).sort((a,b)=>new Date(a.start)-new Date(b.start))
     .forEach(s=>{ const br=isBreak(s);
       rows.push([dayKey(s.start), br?"休憩":"勤務", hhmm(s.start), s.end?hhmm(s.end):"",
         (!br&&s.end)?fmtH(durMin(s)):"", br?"":fmtH(nightMin(s)), (br&&s.end)?fmtH(durMin(s)):""]); });
@@ -531,8 +581,8 @@ $("saveSettings").onclick=()=>{
     nightRate:+$("s_nightRate").value||0.25, weeklyStd:+$("s_weeklyStd").value||40,
     monthlyStd:+$("s_monthlyStd").value||0,
     fixedOt:+$("s_fixedOt").value||0, fixedNight:+$("s_fixedNight").value||0,
-    nightStart:+$("s_nightStart").value||22, nightEnd:+$("s_nightEnd").value||5 };
-  save(LS_SET,settings); renderAll(); alert("設定を保存しました");
+    nightStart:+$("s_nightStart").value||22, nightEnd:+$("s_nightEnd").value||5, mod:nowMs() };
+  save(LS_SET,settings); scheduleSync(); renderAll(); alert("設定を保存しました");
 };
 function downloadFile(name,content,type){
   const b=new Blob([content],{type}); const u=URL.createObjectURL(b);
@@ -552,10 +602,108 @@ $("importData").onclick=()=>{
 $("clearData").onclick=()=>{
   if(confirm("すべての勤怠データと設定を削除します。よろしいですか？")){
     if(confirm("本当に削除しますか？（元に戻せません）")){
-      sessions=[]; saveSessions(); renderAll();
+      // 同期中なら全件tombstone化（他端末からも消すため）。未同期なら単純クリア。
+      if(syncCfg.id){ sessions.forEach(s=>{ s.del=true; touch(s); }); }
+      else { sessions=[]; }
+      saveSessions(); renderAll();
     }
   }
 };
+
+// ---------- クラウド同期（E2E暗号化 + Firebase REST） ----------
+const LS_SYNC="kintai_sync_v1";
+let syncCfg = load(LS_SYNC, {id:"",pass:"",db:""});
+let syncTimer=null, syncing=false;
+
+function setSyncStatus(msg,color){ const el=$("y_status"); if(el){ el.textContent=msg; el.style.color=color||"var(--sub)"; } }
+function fillSyncUI(){ $("y_id").value=syncCfg.id||""; $("y_pass").value=syncCfg.pass||"";
+  $("y_db").value=syncCfg.db||""; setSyncStatus(syncCfg.id?"同期ON："+syncCfg.id:"同期OFF"); }
+
+// --- 暗号化（PBKDF2 → AES-GCM） ---
+const enc=new TextEncoder(), dec=new TextDecoder();
+async function deriveKey(pass,saltStr){
+  const km=await crypto.subtle.importKey("raw",enc.encode(pass),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt:enc.encode("kintai|"+saltStr),iterations:150000,hash:"SHA-256"},
+    km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+function b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function unb64(s){ return Uint8Array.from(atob(s),c=>c.charCodeAt(0)); }
+async function encryptObj(obj,key){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(JSON.stringify(obj)));
+  return {iv:b64(iv),ct:b64(ct)};
+}
+async function decryptObj(payload,key){
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(payload.iv)},key,unb64(payload.ct));
+  return JSON.parse(dec.decode(pt));
+}
+
+// --- マージ（id単位でmodが新しい方を採用、tombstone対応） ---
+function mergeSessions(local,remote){
+  const map=new Map();
+  [...local,...remote].forEach(s=>{
+    if(!s||!s.id)return;
+    const ex=map.get(s.id);
+    if(!ex || (s.mod||0) >= (ex.mod||0)) map.set(s.id,s);
+  });
+  return [...map.values()];
+}
+function pickSettings(local,remote){
+  if(!remote) return local;
+  if(!local) return remote;
+  return (remote.mod||0) > (local.mod||0) ? remote : local;
+}
+
+function dbNode(){ return syncCfg.db.replace(/\/$/,"")+"/kintai/"+encodeURIComponent(syncCfg.id)+".json"; }
+
+async function doSync(){
+  if(!syncCfg.id||!syncCfg.pass||!syncCfg.db){ return; }
+  if(syncing) return; syncing=true;
+  try{
+    setSyncStatus("同期中…","var(--accent)");
+    const key=await deriveKey(syncCfg.pass, syncCfg.id);
+    // 1) pull
+    let remote=null;
+    const res=await fetch(dbNode(),{cache:"no-store"});
+    if(res.ok){ const raw=await res.json();
+      if(raw && raw.ct){ try{ remote=await decryptObj(raw,key); }
+        catch(e){ setSyncStatus("⚠ 合言葉が違うため復号できません","var(--red)"); syncing=false; return; } } }
+    // 2) merge
+    const mergedSessions = remote ? mergeSessions(sessions, remote.sessions||[]) : sessions.slice();
+    const mergedSettings = remote ? pickSettings(settings, remote.settings) : settings;
+    sessions=mergedSessions; settings=Object.assign(settings,mergedSettings);
+    save(LS_SESS,sessions); save(LS_SET,settings);
+    // 3) push（暗号化して保存）
+    const payload=await encryptObj({sessions,settings,v:1}, key);
+    const put=await fetch(dbNode(),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!put.ok){ throw new Error("HTTP "+put.status); }
+    fillSettings(); renderAll();
+    const t=new Date(); setSyncStatus(`✓ 同期完了 ${pad(t.getHours())}:${pad(t.getMinutes())}`,"var(--green)");
+  }catch(e){
+    setSyncStatus("⚠ 同期に失敗しました（接続またはFirebase設定を確認）","var(--red)");
+  }finally{ syncing=false; }
+}
+// 打刻のたびに呼ばれる。同期ONなら少し待って自動同期（連打をまとめる）
+function scheduleSync(){
+  if(!syncCfg.id) return;
+  clearTimeout(syncTimer); syncTimer=setTimeout(doSync, 1500);
+}
+
+$("y_save").onclick=async()=>{
+  const id=$("y_id").value.trim(), pass=$("y_pass").value, db=$("y_db").value.trim();
+  if(!id||!pass||!db){ alert("同期ID・合言葉・Firebase設定をすべて入力してください"); return; }
+  syncCfg={id,pass,db}; save(LS_SYNC,syncCfg);
+  await doSync();
+};
+$("y_now").onclick=()=>{ if(!syncCfg.id){ alert("先に同期を有効にしてください"); return; } doSync(); };
+$("y_off").onclick=()=>{
+  if(confirm("この端末で同期を停止します（記録はこの端末に残ります）。よろしいですか？")){
+    syncCfg={id:"",pass:"",db:""}; save(LS_SYNC,syncCfg); fillSyncUI();
+  }
+};
+// 起動時とタブ復帰時に自動同期
+window.addEventListener("focus", ()=>{ if(syncCfg.id) doSync(); });
 
 // ---------- タブ ----------
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
@@ -566,7 +714,8 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
 
 // ---------- 描画 ----------
 function renderAll(){ renderPunch(); renderRecords(); renderReport(); }
-fillSettings(); renderAll(); tickClock(); setInterval(tickClock,1000);
+fillSettings(); fillSyncUI(); renderAll(); tickClock(); setInterval(tickClock,1000);
+if(syncCfg.id) doSync();   // 起動時に自動で取り込み
 </script>
 </body>
 </html>
