@@ -40,6 +40,12 @@
   .bigbtn:active{transform:scale(.98);}
   .bigbtn.start{background:linear-gradient(135deg,#2ecc71,#27ae60);}
   .bigbtn.stop{background:linear-gradient(135deg,#ff5d6c,#e84150);}
+  .bigbtn.resume{background:linear-gradient(135deg,#4f8cff,#3a6fd8);}
+  .subbtn{display:block;width:100%;border:1px solid var(--line);border-radius:14px;padding:15px;
+    font-size:16px;font-weight:700;color:var(--amber);background:var(--card2);cursor:pointer;
+    margin-top:10px;transition:transform .05s;}
+  .subbtn:active{transform:scale(.98);}
+  .tag.break{background:rgba(255,182,72,.18);color:#ffce8a;}
   .btn{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 14px;font-size:14px;
     font-weight:600;cursor:pointer;}
   .btn.sm{padding:6px 11px;font-size:13px;}
@@ -110,8 +116,9 @@
       <div class="clock" id="liveClock">--:--:--</div>
       <div class="status" id="punchStatus"></div>
       <button class="bigbtn start" id="mainBtn">勤務開始</button>
+      <button class="subbtn" id="breakBtn" style="display:none">休憩に入る</button>
       <div class="hint" style="text-align:center;margin-top:10px;">
-        フレックス対応：1日に何度でも開始／終了できます。休憩のたびに「終了」、戻ったら「開始」でOK。
+        フレックス対応：1日に何度でも打刻できます。お昼などの休憩は「休憩に入る」、戻ったら「勤務再開」。休憩時間は勤務時間から自動で除かれます。
       </div>
     </div>
     <div class="card">
@@ -291,6 +298,7 @@ function nightMin(s){
 }
 
 function openSession(){ return sessions.find(s=>!s.end); }
+function isBreak(s){ return s.type==="break"; }
 
 // ---------- 打刻 ----------
 function tickClock(){
@@ -300,14 +308,24 @@ function tickClock(){
 }
 function renderPunch(){
   const open=openSession();
-  const dot=$("liveDot"), btn=$("mainBtn"), st=$("punchStatus");
-  if(open){
+  const dot=$("liveDot"), btn=$("mainBtn"), bbtn=$("breakBtn"), st=$("punchStatus");
+  if(open && isBreak(open)){
+    // 休憩中
+    dot.classList.remove("on");
+    btn.className="bigbtn resume"; btn.textContent="勤務再開";
+    bbtn.style.display="none";
+    st.innerHTML=`<b style="color:var(--amber)">休憩中</b>（${hhmm(open.start)} から）`;
+  }else if(open){
+    // 勤務中
     dot.classList.add("on");
     btn.className="bigbtn stop"; btn.textContent="勤務終了";
+    bbtn.style.display="block"; bbtn.textContent="休憩に入る";
     st.innerHTML=`<b>勤務中</b>（${hhmm(open.start)} 開始）`;
   }else{
+    // 勤務外
     dot.classList.remove("on");
     btn.className="bigbtn start"; btn.textContent="勤務開始";
+    bbtn.style.display="none";
     st.textContent="現在は勤務外です";
   }
   // 今日の打刻
@@ -315,23 +333,42 @@ function renderPunch(){
   const todays=sessions.filter(s=>dayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
   const box=$("todaySessions");
   if(!todays.length){ box.innerHTML=`<div class="empty">まだ打刻がありません</div>`; $("todayTotal").textContent=""; return; }
-  let tot=0;
+  let tot=0, brk=0;
   box.innerHTML=todays.map(s=>{
-    tot+=durMin(s);
-    const nm=nightMin(s);
+    const br=isBreak(s);
+    if(br){ brk+=durMin(s); } else { tot+=durMin(s); }
+    const nm=br?0:nightMin(s);
+    const openTag = br?'<span class="tag break">休憩中</span>':'<span class="tag open">勤務中</span>';
     return `<div class="sess">
+      ${br?'<span class="tag break">休憩</span>':''}
       <span class="t">${hhmm(s.start)}</span><span style="color:var(--sub)">→</span>
-      <span class="t">${s.end?hhmm(s.end):'<span class="tag open">勤務中</span>'}</span>
+      <span class="t">${s.end?hhmm(s.end):openTag}</span>
       ${nm>0?`<span class="tag night">深夜${fmtH(nm)}</span>`:""}
       <span class="dur">${s.end?fmtH(durMin(s)):""}</span></div>`;
   }).join("");
-  $("todayTotal").textContent=`合計 ${fmtH(tot)}`;
+  $("todayTotal").textContent=`勤務 ${fmtH(tot)}${brk>0?` / 休憩 ${fmtH(brk)}`:""}`;
 }
 $("mainBtn").onclick=()=>{
   const open=openSession();
-  if(open){ open.end=new Date().toISOString(); }
-  else{ sessions.push({id:uid(), start:new Date().toISOString(), end:null}); }
+  const now=new Date().toISOString();
+  if(open && isBreak(open)){
+    open.end=now;                                    // 休憩を終了し
+    sessions.push({id:uid(), start:now, end:null});  // 勤務を自動再開
+  }else if(open){
+    open.end=now;                                    // 勤務終了
+  }else{
+    sessions.push({id:uid(), start:now, end:null});  // 勤務開始
+  }
   saveSessions(); renderAll();
+};
+$("breakBtn").onclick=()=>{
+  const open=openSession();
+  if(open && !isBreak(open)){
+    const now=new Date().toISOString();
+    open.end=now;                                   // 勤務をいったん終了
+    sessions.push({id:uid(), start:now, end:null, type:"break"}); // 休憩開始
+    saveSessions(); renderAll();
+  }
 };
 
 // ---------- 記録・修正 ----------
@@ -344,15 +381,17 @@ function renderRecords(){
   const box=$("recordsList");
   if(!sessions.length){ box.innerHTML=`<div class="empty">記録がありません</div>`; return; }
   box.innerHTML=groupByDay(sessions).map(g=>{
-    let tot=0,nt=0; g.items.forEach(s=>{tot+=durMin(s);nt+=nightMin(s);});
-    const rows=g.items.map(s=>`<div class="sess" data-id="${s.id}" style="cursor:pointer">
+    let tot=0,nt=0,brk=0; g.items.forEach(s=>{ if(isBreak(s)){brk+=durMin(s);} else {tot+=durMin(s);nt+=nightMin(s);} });
+    const rows=g.items.map(s=>{ const br=isBreak(s);
+      return `<div class="sess" data-id="${s.id}" style="cursor:pointer">
+        ${br?'<span class="tag break">休憩</span>':''}
         <span class="t">${hhmm(s.start)}</span><span style="color:var(--sub)">→</span>
-        <span class="t">${s.end?hhmm(s.end):'<span class="tag open">勤務中</span>'}</span>
-        ${nightMin(s)>0?`<span class="tag night">深夜</span>`:""}
-        <span class="dur">${s.end?fmtH(durMin(s)):""} ✎</span></div>`).join("");
+        <span class="t">${s.end?hhmm(s.end):(br?'<span class="tag break">休憩中</span>':'<span class="tag open">勤務中</span>')}</span>
+        ${!br&&nightMin(s)>0?`<span class="tag night">深夜</span>`:""}
+        <span class="dur">${s.end?fmtH(durMin(s)):""} ✎</span></div>`; }).join("");
     return `<div class="card day-group">
       <div class="day-head">${dateLabel(g.key)}
-        <span class="meta">勤務 ${fmtH(tot)}${nt>0?` / 深夜 ${fmtH(nt)}`:""}</span></div>
+        <span class="meta">勤務 ${fmtH(tot)}${nt>0?` / 深夜 ${fmtH(nt)}`:""}${brk>0?` / 休憩 ${fmtH(brk)}`:""}</span></div>
       ${rows}</div>`;
   }).join("");
   box.querySelectorAll(".sess[data-id]").forEach(el=>el.onclick=()=>openModal(el.dataset.id));
@@ -363,7 +402,7 @@ let editingId=null;
 function openModal(id){
   editingId=id;
   const s=id?sessions.find(x=>x.id===id):null;
-  $("modalTitle").textContent=id?"勤務を編集":"勤務を手動で追加";
+  $("modalTitle").textContent = s&&isBreak(s) ? "休憩を編集" : (id?"勤務を編集":"勤務を手動で追加");
   if(s){ $("m_start").value=toLocalInput(s.start); $("m_end").value=toLocalInput(s.end); }
   else{
     const now=new Date(); now.setSeconds(0,0);
@@ -399,9 +438,9 @@ function monthKey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
 function renderReport(){
   $("curMonth").textContent=`${viewMonth.getFullYear()}年 ${viewMonth.getMonth()+1}月`;
   const mk=monthKey(viewMonth);
-  const inMonth=sessions.filter(s=>monthKey(new Date(s.start))===mk && s.end);
+  const inMonth=sessions.filter(s=>monthKey(new Date(s.start))===mk && s.end && !isBreak(s));
 
-  // 日別
+  // 日別（休憩は勤務・深夜に含めない）
   const days={};
   inMonth.forEach(s=>{ const k=dayKey(s.start);
     days[k]=days[k]||{work:0,night:0}; days[k].work+=durMin(s); days[k].night+=nightMin(s); });
@@ -463,9 +502,11 @@ $("nextMonth").onclick=()=>{ viewMonth.setMonth(viewMonth.getMonth()+1); renderR
 
 $("exportCsv").onclick=()=>{
   const mk=monthKey(viewMonth);
-  const rows=[["日付","開始","終了","勤務(時:分)","深夜(時:分)"]];
+  const rows=[["日付","種別","開始","終了","勤務(時:分)","深夜(時:分)","休憩(時:分)"]];
   sessions.filter(s=>monthKey(new Date(s.start))===mk).sort((a,b)=>new Date(a.start)-new Date(b.start))
-    .forEach(s=>rows.push([dayKey(s.start),hhmm(s.start),s.end?hhmm(s.end):"",s.end?fmtH(durMin(s)):"",fmtH(nightMin(s))]));
+    .forEach(s=>{ const br=isBreak(s);
+      rows.push([dayKey(s.start), br?"休憩":"勤務", hhmm(s.start), s.end?hhmm(s.end):"",
+        (!br&&s.end)?fmtH(durMin(s)):"", br?"":fmtH(nightMin(s)), (br&&s.end)?fmtH(durMin(s)):""]); });
   const csv="\uFEFF"+rows.map(r=>r.join(",")).join("\n");
   downloadFile(`勤怠_${mk}.csv`, csv, "text/csv");
 };
