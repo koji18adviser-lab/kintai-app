@@ -702,8 +702,11 @@ $("y_off").onclick=()=>{
     syncCfg={id:"",pass:"",db:""}; save(LS_SYNC,syncCfg); fillSyncUI();
   }
 };
-// 起動時とタブ復帰時に自動同期
+// 起動時・タブ復帰時・スマホで画面に戻った時に自動同期
 window.addEventListener("focus", ()=>{ if(syncCfg.id) doSync(); });
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && syncCfg.id) doSync(); });
+// 開いている間も定期的に自動同期（30秒ごと・画面が見えている時だけ）
+setInterval(()=>{ if(syncCfg.id && !document.hidden) doSync(); }, 30000);
 
 // ---------- タブ ----------
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
