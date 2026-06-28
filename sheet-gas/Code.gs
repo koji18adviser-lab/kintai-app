@@ -8,8 +8,11 @@
  *       出社時刻 = その日の最初の勤務開始
  *       退社時刻 = その日の最後の勤務終了
  *       休憩時間 = (退社 - 出社) - 実働時間  ← 空き時間・休憩を全部含む
+ *       勤務時間 = 実働時間（その日の勤務セッションの合計）
  *       深夜労働 = 22時〜翌5時に重なった実働（設定で変更可）
- *     ※ 普通残業 / 40H超残業 / 休日出勤 などの列は既存の計算式に任せます（触りません）
+ *       深夜休憩時間 = 22時〜翌5時に重なった休憩（深夜帯の空き時間 − 深夜労働）
+ *     ※ 普通残業 / 40H超残業 / 休日出勤 の列は既存の計算式に任せます（触りません）
+ *       → これらは「勤務時間」が入れば月次テンプレ側の式で自動計算されます
  *
  * 設定 (CONFIG):
  *   TZ            … タイムゾーン。日本なら "Asia/Tokyo"
@@ -24,6 +27,7 @@ var CONFIG = {
   MONTHLY_SHEET: "",       // 例: "勤務時間表"。空なら先頭シート
   DETAIL_SHEET: "明細",
   WRITE_NIGHT: true,
+  WRITE_WORK: true,        // 勤務時間・深夜休憩時間 をアプリの値で入力（テンプレに式があれば上書き）
   CLEAR_EMPTY: true
 };
 
@@ -186,6 +190,8 @@ function writeMonthly_(ss, sessions, settings) {
         else if (t === "出社時刻" && col.in == null) col.in = c;     // 最初の「出社時刻」
         else if (t === "退社時刻" && col.out == null) col.out = c;   // 最初の「退社時刻」
         else if (t === "休憩時間" && col.brk == null) col.brk = c;
+        else if (t === "勤務時間" && col.work == null) col.work = c;
+        else if (t === "深夜休憩時間" && col.nightBrk == null) col.nightBrk = c;
         else if (t === "深夜労働" && col.night == null) col.night = c;
       }
       break;
@@ -245,6 +251,15 @@ function writeMonthly_(ss, sessions, settings) {
       var spanMin = (a.lastOut - a.firstIn) / 60000;
       var brkMin = Math.max(0, spanMin - a.work);
       sh.getRange(row, col.brk + 1).setValue(fmtHM_(brkMin));
+      if (CONFIG.WRITE_WORK && col.work != null) {
+        sh.getRange(row, col.work + 1).setValue(fmtHM_(a.work)); // 勤務時間 = 実働合計
+      }
+      if (CONFIG.WRITE_WORK && col.nightBrk != null) {
+        // 深夜帯の空き時間 = 深夜帯に重なった全体時間 − 深夜労働
+        var nightSpan = nightMin_({ start: a.firstIn, end: a.lastOut }, settings);
+        var nightBrkMin = Math.max(0, nightSpan - a.night);
+        sh.getRange(row, col.nightBrk + 1).setValue(nightBrkMin > 0 ? fmtHM_(nightBrkMin) : "");
+      }
       if (CONFIG.WRITE_NIGHT && col.night != null) {
         sh.getRange(row, col.night + 1).setValue(a.night > 0 ? fmtHM_(a.night) : "");
       }
@@ -253,6 +268,8 @@ function writeMonthly_(ss, sessions, settings) {
       sh.getRange(row, col.in + 1).clearContent();
       sh.getRange(row, col.out + 1).clearContent();
       sh.getRange(row, col.brk + 1).clearContent();
+      if (CONFIG.WRITE_WORK && col.work != null) sh.getRange(row, col.work + 1).clearContent();
+      if (CONFIG.WRITE_WORK && col.nightBrk != null) sh.getRange(row, col.nightBrk + 1).clearContent();
     }
   });
 
