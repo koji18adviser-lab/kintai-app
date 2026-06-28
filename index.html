@@ -161,6 +161,8 @@
       <div style="overflow-x:auto"><table id="dailyTable"></table></div>
     </div>
     <button class="btn ghost" id="exportCsv" style="width:100%">CSVで書き出す</button>
+    <button class="btn" id="syncSheetBtn" style="width:100%;margin-top:10px;">スプレッドシートに同期</button>
+    <div class="hint" id="syncSheetHint" style="text-align:center;"></div>
   </section>
 
   <!-- 設定 -->
@@ -227,6 +229,18 @@
         <button class="btn ghost sm" id="y_off">同期を停止</button>
       </div>
       <div class="hint" id="y_status" style="margin-top:10px;font-weight:600;"></div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="sectitle">スプレッドシート連携</div>
+      <div class="hint" style="margin-top:0">Google スプレッドシートの勤務時間表に、ボタンひとつで記録を書き込みます。先にスプレッドシート側で Apps Script を設定し、発行された「ウェブアプリURL」を下に貼り付けてください（設定手順は配布資料を参照）。明細シートに全打刻、月次シートにStoke公式フォーマットで自動集計されます。</div>
+      <label>ウェブアプリURL（GAS）</label>
+      <input type="text" id="sheet_url" placeholder="https://script.google.com/macros/s/..../exec" autocomplete="off">
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="sheet_sync" style="flex:1">シートに同期</button>
+        <button class="btn ghost sm" id="sheet_save">URLを保存</button>
+      </div>
+      <div class="hint" id="sheet_status" style="margin-top:10px;font-weight:600;"></div>
     </div>
 
     <div class="card" style="margin-top:14px;">
@@ -708,6 +722,33 @@ document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && syncC
 // 開いている間も定期的に自動同期（30秒ごと・画面が見えている時だけ）
 setInterval(()=>{ if(syncCfg.id && !document.hidden) doSync(); }, 30000);
 
+// ---------- スプレッドシート連携 ----------
+const LS_SHEET="kintai_sheet_v1";
+let sheetCfg = load(LS_SHEET, {url:""});
+function setSheetStatus(msg,color){ const el=$("sheet_status"); if(el){ el.textContent=msg; el.style.color=color||"var(--sub)"; } }
+function fillSheetUI(){ const i=$("sheet_url"); if(i) i.value=sheetCfg.url||"";
+  setSheetStatus(sheetCfg.url?"連携先URL：設定済み":"未設定（URLを保存してください）"); }
+async function syncToSheet(statusFn){
+  const setS = statusFn || setSheetStatus;
+  if(!sheetCfg.url){ alert("先に「設定」タブでウェブアプリURLを保存してください"); return; }
+  try{
+    setS("シートに送信中…","var(--accent)");
+    const body=JSON.stringify({ type:"kintai", sessions:liveSessions(), settings });
+    const res=await fetch(sheetCfg.url,{method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"}, body, redirect:"follow"});
+    const data=await res.json().catch(()=>null);
+    if(data&&data.ok){ setS(`✓ シート更新：月次 ${data.written||0}日分（${data.month||"-"}）／明細 ${data.detail||0}件`,"var(--green)"); }
+    else { setS("⚠ シート側エラー："+((data&&data.error)||("HTTP "+res.status)),"var(--red)"); }
+  }catch(e){ setS("⚠ 送信に失敗（URL・公開設定・通信を確認）","var(--red)"); }
+}
+$("sheet_save").onclick=()=>{ sheetCfg={url:$("sheet_url").value.trim()}; save(LS_SHEET,sheetCfg);
+  fillSheetUI(); alert("URLを保存しました"); };
+$("sheet_sync").onclick=()=>syncToSheet();
+$("syncSheetBtn").onclick=()=>syncToSheet((msg,color)=>{
+  setSheetStatus(msg,color);
+  const h=$("syncSheetHint"); if(h){ h.textContent=msg; h.style.color=color||"var(--sub)"; }
+});
+
 // ---------- タブ ----------
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));
@@ -717,7 +758,7 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
 
 // ---------- 描画 ----------
 function renderAll(){ renderPunch(); renderRecords(); renderReport(); }
-fillSettings(); fillSyncUI(); renderAll(); tickClock(); setInterval(tickClock,1000);
+fillSettings(); fillSyncUI(); fillSheetUI(); renderAll(); tickClock(); setInterval(tickClock,1000);
 if(syncCfg.id) doSync();   // 起動時に自動で取り込み
 </script>
 </body>
