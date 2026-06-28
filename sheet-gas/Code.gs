@@ -176,8 +176,11 @@ function writeDetail_(ss, sessions, settings) {
   sh.getRange(1, 1, Math.max(lastRow, 2), nCol)
     .setBorder(true, true, true, true, true, true, "#9aa6c2", SpreadsheetApp.BorderStyle.SOLID);
 
-  // 列幅を内容に合わせて調整
-  var widths = [96, 46, 54, 60, 74, 86, 70, 86, 70, 86];
+  // 文字サイズを 12pt に（小さくて読みづらいため）
+  sh.getRange(1, 1, Math.max(lastRow, 2), nCol).setFontSize(12);
+
+  // 列幅を内容に合わせて調整（12ptに合わせて少し広め）
+  var widths = [104, 52, 60, 68, 82, 96, 78, 96, 78, 96];
   for (var w = 0; w < nCol; w++) sh.setColumnWidth(w + 1, widths[w]);
 
   sh.setFrozenRows(2);
