@@ -92,40 +92,79 @@ function weekday_(dk) {
   return WD_[new Date(dk + "T12:00:00Z").getUTCDay()];
 }
 
-/* ---------- 明細シート（全打刻ログ） ---------- */
+/* ---------- 明細シート（全打刻ログ・公式シートと同じトーンに整形） ---------- */
 function writeDetail_(ss, sessions, settings) {
   var sh = ss.getSheetByName(CONFIG.DETAIL_SHEET);
   if (!sh) sh = ss.insertSheet(CONFIG.DETAIL_SHEET);
-  sh.clearContents();
 
   var header = ["日付", "曜日", "種別", "開始", "終了", "実働(時:分)", "実働(分)", "深夜(時:分)", "深夜(分)", "休憩(時:分)"];
-  var rows = [header];
+  var nCol = header.length;
 
+  // データ行を構築（行ごとの日付キーも保持して日別グループ分けに使う）
+  var body = [], dayOf = [];
   sessions.slice()
     .sort(function (a, b) { return new Date(a.start) - new Date(b.start); })
     .forEach(function (s) {
-      var br = isBreak_(s);
-      var dk = dayKey_(s.start);
-      var dur = durMin_(s);
-      var nm = br ? 0 : nightMin_(s, settings);
-      rows.push([
-        dk,
-        weekday_(dk),
-        br ? "休憩" : "勤務",
-        hhmm_(s.start),
-        s.end ? hhmm_(s.end) : "(勤務中)",
-        br ? "" : (s.end ? fmtHM_(dur) : ""),
-        br ? "" : (s.end ? Math.round(dur) : ""),
-        nm > 0 ? fmtHM_(nm) : "",
-        nm > 0 ? Math.round(nm) : "",
+      var br = isBreak_(s), dk = dayKey_(s.start), dur = durMin_(s), nm = br ? 0 : nightMin_(s, settings);
+      body.push([
+        dk, weekday_(dk), br ? "休憩" : "勤務",
+        hhmm_(s.start), s.end ? hhmm_(s.end) : "(勤務中)",
+        br ? "" : (s.end ? fmtHM_(dur) : ""), br ? "" : (s.end ? Math.round(dur) : ""),
+        nm > 0 ? fmtHM_(nm) : "", nm > 0 ? Math.round(nm) : "",
         (br && s.end) ? fmtHM_(dur) : ""
       ]);
+      dayOf.push(dk);
     });
 
-  sh.getRange(1, 1, rows.length, header.length).setValues(rows);
-  sh.setFrozenRows(1);
-  sh.getRange(1, 1, 1, header.length).setFontWeight("bold");
-  return rows.length - 1; // 件数
+  // いったん中身も書式も全消去（前回の色・罫線が残らないように）
+  sh.clear();
+  sh.getRange(1, 1, 1, nCol).breakApart();
+
+  // 1行目：タイトル帯（公式シートのグレー帯に合わせる）
+  sh.getRange(1, 1, 1, nCol).merge();
+  sh.getRange(1, 1)
+    .setValue("勤怠 明細（全打刻ログ）　※1日に複数回の勤務もそのまま記録")
+    .setFontWeight("bold").setFontColor("#ffffff").setBackground("#434343")
+    .setHorizontalAlignment("center").setVerticalAlignment("middle");
+  sh.setRowHeight(1, 30);
+
+  // 2行目：ヘッダー（公式シートの青ヘッダーに合わせる）
+  sh.getRange(2, 1, 1, nCol).setValues([header])
+    .setFontWeight("bold").setBackground("#c9daf8")
+    .setHorizontalAlignment("center").setVerticalAlignment("middle");
+  sh.setRowHeight(2, 26);
+
+  var lastRow = 2 + body.length;
+
+  // データ書き込み＋日別の薄い背景でグループ分け
+  if (body.length) {
+    sh.getRange(3, 1, body.length, nCol).setValues(body)
+      .setHorizontalAlignment("center").setVerticalAlignment("middle");
+
+    var bg = [], shade = false, prevDay = null;
+    for (var i = 0; i < body.length; i++) {
+      if (dayOf[i] !== prevDay) { shade = !shade; prevDay = dayOf[i]; } // 日が変わるたび背景を交互に
+      var rowBg = [];
+      for (var c = 0; c < nCol; c++) rowBg.push(shade ? "#f3f6fc" : "#ffffff");
+      if (body[i][2] === "休憩") rowBg[2] = "#fff2cc";                  // 休憩は種別セルを薄オレンジ
+      bg.push(rowBg);
+      if (body[i][4] === "(勤務中)") {                                  // 勤務中は緑で強調
+        sh.getRange(3 + i, 5).setFontColor("#1e8e3e").setFontWeight("bold");
+      }
+    }
+    sh.getRange(3, 1, body.length, nCol).setBackgrounds(bg);
+  }
+
+  // 全体に罫線（公式シートと同じ薄い線）
+  sh.getRange(1, 1, Math.max(lastRow, 2), nCol)
+    .setBorder(true, true, true, true, true, true, "#9aa6c2", SpreadsheetApp.BorderStyle.SOLID);
+
+  // 列幅を内容に合わせて調整
+  var widths = [96, 46, 54, 60, 74, 86, 70, 86, 70, 86];
+  for (var w = 0; w < nCol; w++) sh.setColumnWidth(w + 1, widths[w]);
+
+  sh.setFrozenRows(2);
+  return body.length; // 件数
 }
 
 /* ---------- 月次シート（Stoke公式フォーマットに自動入力） ---------- */
