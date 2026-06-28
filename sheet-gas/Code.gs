@@ -72,6 +72,15 @@ function fmtHM_(min) {
   return sign + Math.floor(min / 60) + ":" + ("0" + (min % 60)).slice(-2);
 }
 
+// 時間（分）を「シートが合計できる本物の時刻値」として書き込む。
+// 1日=1.0 の割合（分/1440）で入れ、表示書式 [h]:mm を付ける → SUM が効く。
+function setDur_(sh, row, colIndex, min, blankIfZero) {
+  var cell = sh.getRange(row, colIndex + 1);
+  if (blankIfZero && (!min || min <= 0)) { cell.clearContent(); return; }
+  cell.setNumberFormat("[h]:mm");
+  cell.setValue(Math.round(min) / 1440);
+}
+
 // 区間と深夜帯(既定22:00〜翌5:00)の重なり(分)。日またぎ対応。アプリ側ロジックと同一
 function nightMin_(s, settings) {
   if (!s.end) return 0;
@@ -250,18 +259,18 @@ function writeMonthly_(ss, sessions, settings) {
       sh.getRange(row, col.out + 1).setValue(hhmm_(a.lastOut));
       var spanMin = (a.lastOut - a.firstIn) / 60000;
       var brkMin = Math.max(0, spanMin - a.work);
-      sh.getRange(row, col.brk + 1).setValue(fmtHM_(brkMin));
+      setDur_(sh, row, col.brk, brkMin, false);                  // 休憩時間（合計が効くよう数値で）
       if (CONFIG.WRITE_WORK && col.work != null) {
-        sh.getRange(row, col.work + 1).setValue(fmtHM_(a.work)); // 勤務時間 = 実働合計
+        setDur_(sh, row, col.work, a.work, false);               // 勤務時間 = 実働合計
       }
       if (CONFIG.WRITE_WORK && col.nightBrk != null) {
         // 深夜帯の空き時間 = 深夜帯に重なった全体時間 − 深夜労働
         var nightSpan = nightMin_({ start: a.firstIn, end: a.lastOut }, settings);
         var nightBrkMin = Math.max(0, nightSpan - a.night);
-        sh.getRange(row, col.nightBrk + 1).setValue(nightBrkMin > 0 ? fmtHM_(nightBrkMin) : "");
+        setDur_(sh, row, col.nightBrk, nightBrkMin, true);       // 深夜休憩時間
       }
       if (CONFIG.WRITE_NIGHT && col.night != null) {
-        sh.getRange(row, col.night + 1).setValue(a.night > 0 ? fmtHM_(a.night) : "");
+        setDur_(sh, row, col.night, a.night, true);              // 深夜労働
       }
       written++;
     } else if (CONFIG.CLEAR_EMPTY) {
@@ -274,4 +283,29 @@ function writeMonthly_(ss, sessions, settings) {
   });
 
   return { written: written, month: mk };
+}
+
+/* ---------- 診断用：合計・休日出勤などの計算式を確認する ----------
+ * Apps Script エディタ上部の関数で dumpMonthly を選んで「実行」し、
+ * 「実行ログ」に出る内容をそのまま貼り付けてもらえれば、
+ * 合計や休日出勤がどのセルの式で出ているかが分かります（シートは変更しません）。
+ */
+function dumpMonthly() {
+  var sh = CONFIG.MONTHLY_SHEET ? SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MONTHLY_SHEET)
+                                : SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var formulas = sh.getDataRange().getFormulas();
+  var lines = ["[シート名] " + sh.getName()];
+  for (var r = 0; r < formulas.length; r++) {
+    for (var c = 0; c < formulas[r].length; c++) {
+      var f = formulas[r][c];
+      if (f) lines.push("R" + (r + 1) + "C" + (c + 1) + " (" + a1_(r, c) + "): " + f);
+    }
+  }
+  if (lines.length === 1) lines.push("(計算式は1つも見つかりませんでした → 合計などは手入力か、空のようです)");
+  Logger.log(lines.join("\n"));
+}
+function a1_(r, c) {
+  var col = "", n = c + 1;
+  while (n > 0) { var m = (n - 1) % 26; col = String.fromCharCode(65 + m) + col; n = (n - m - 1) / 26; }
+  return col + (r + 1);
 }
