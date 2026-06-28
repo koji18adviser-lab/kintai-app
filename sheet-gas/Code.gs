@@ -32,6 +32,7 @@ var CONFIG = {
   WRITE_HOLIDAY: true,     // 休日（HOLIDAY_WEEKDAYS）の勤務時間を「休日出勤」列に入力
   HOLIDAY_WEEKDAYS: [0, 6],// 休日とみなす曜日（0=日,1=月,…,6=土）。所定休日が土日なら [0,6]
   WRITE_TOTALS: true,      // 合計行（出勤日数/勤務時間/深夜労働/休日出勤）と小集計表を自動計算
+  MONTHLY_FONT_SIZE: 12,   // 月次シートの日別テーブルの文字サイズ（pt）。0/null で変更しない
   CLEAR_EMPTY: true
 };
 
@@ -325,6 +326,28 @@ function writeMonthly_(ss, sessions, settings) {
           rm = data.length; break;
         }
       }
+    }
+  }
+
+  // 7) 月次の日別テーブル＋合計行の文字サイズを読みやすく（既定12pt）
+  if (CONFIG.MONTHLY_FONT_SIZE) {
+    var idxs = Object.keys(dayRow).map(function (k) { return dayRow[k]; });
+    if (idxs.length) {
+      var firstR = Math.min.apply(null, idxs), lastR = Math.max.apply(null, idxs);
+      // 合計行（出勤日数）も含める
+      var bottomR = lastR;
+      for (var rf = lastR + 1; rf < data.length && rf <= lastR + 3; rf++) {
+        for (var cf = 0; cf < data[rf].length; cf++) {
+          if (String(data[rf][cf]).replace(/\s/g, "") === "出勤日数") { bottomR = rf; break; }
+        }
+      }
+      // ヘッダー行の最終列（備考まで）
+      var lastCol = 0;
+      for (var hc = 0; hc < data[hRow].length; hc++) {
+        if (String(data[hRow][hc]).replace(/\s/g, "") !== "") lastCol = hc;
+      }
+      sh.getRange(firstR + 1, 1, bottomR - firstR + 1, lastCol + 1)
+        .setFontSize(CONFIG.MONTHLY_FONT_SIZE);
     }
   }
 
