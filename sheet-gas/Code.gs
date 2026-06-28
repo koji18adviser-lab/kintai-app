@@ -11,8 +11,9 @@
  *       勤務時間 = 実働時間（その日の勤務セッションの合計）
  *       深夜労働 = 22時〜翌5時に重なった実働（設定で変更可）
  *       深夜休憩時間 = 22時〜翌5時に重なった休憩（深夜帯の空き時間 − 深夜労働）
- *     ※ 普通残業 / 40H超残業 / 休日出勤 の列は既存の計算式に任せます（触りません）
- *       → これらは「勤務時間」が入れば月次テンプレ側の式で自動計算されます
+ *       休日出勤 = 所定休日（既定=土日。HOLIDAY_WEEKDAYS）に働いた日の勤務時間
+ *       合計行 = 出勤日数 / 勤務時間 / 深夜労働 / 休日出勤 を自動集計（小集計表も）
+ *     ※ 普通残業 / 40H超残業 の列は触りません（会社の計算ルール次第のため手入力／別途）
  *
  * 設定 (CONFIG):
  *   TZ            … タイムゾーン。日本なら "Asia/Tokyo"
@@ -28,6 +29,9 @@ var CONFIG = {
   DETAIL_SHEET: "明細",
   WRITE_NIGHT: true,
   WRITE_WORK: true,        // 勤務時間・深夜休憩時間 をアプリの値で入力（テンプレに式があれば上書き）
+  WRITE_HOLIDAY: true,     // 休日（HOLIDAY_WEEKDAYS）の勤務時間を「休日出勤」列に入力
+  HOLIDAY_WEEKDAYS: [0, 6],// 休日とみなす曜日（0=日,1=月,…,6=土）。所定休日が土日なら [0,6]
+  WRITE_TOTALS: true,      // 合計行（出勤日数/勤務時間/深夜労働/休日出勤）と小集計表を自動計算
   CLEAR_EMPTY: true
 };
 
@@ -201,6 +205,7 @@ function writeMonthly_(ss, sessions, settings) {
         else if (t === "休憩時間" && col.brk == null) col.brk = c;
         else if (t === "勤務時間" && col.work == null) col.work = c;
         else if (t === "深夜休憩時間" && col.nightBrk == null) col.nightBrk = c;
+        else if (t === "休日出勤" && col.holiday == null) col.holiday = c;
         else if (t === "深夜労働" && col.night == null) col.night = c;
       }
       break;
@@ -248,8 +253,9 @@ function writeMonthly_(ss, sessions, settings) {
     a.night += nightMin_(s, settings);
   });
 
-  // 5) 書き込み
+  // 5) 書き込み（同時に合計も集計）
   var written = 0;
+  var totWork = 0, totNight = 0, totHoliday = 0, dayCount = 0;
   Object.keys(dayRow).forEach(function (dStr) {
     var d = Number(dStr);
     var row = dayRow[d] + 1; // 1始まり
@@ -272,6 +278,14 @@ function writeMonthly_(ss, sessions, settings) {
       if (CONFIG.WRITE_NIGHT && col.night != null) {
         setDur_(sh, row, col.night, a.night, true);              // 深夜労働
       }
+      // 休日出勤：所定休日（既定=土日）に働いた日の勤務時間をそのまま入れる
+      var wd = new Date(mk + "-" + ("0" + d).slice(-2) + "T12:00:00Z").getUTCDay();
+      var isHoliday = CONFIG.HOLIDAY_WEEKDAYS.indexOf(wd) >= 0;
+      if (CONFIG.WRITE_HOLIDAY && col.holiday != null) {
+        if (isHoliday) { setDur_(sh, row, col.holiday, a.work, true); totHoliday += a.work; }
+        else { sh.getRange(row, col.holiday + 1).clearContent(); }
+      }
+      totWork += a.work; totNight += a.night; dayCount++;
       written++;
     } else if (CONFIG.CLEAR_EMPTY) {
       sh.getRange(row, col.in + 1).clearContent();
@@ -279,8 +293,37 @@ function writeMonthly_(ss, sessions, settings) {
       sh.getRange(row, col.brk + 1).clearContent();
       if (CONFIG.WRITE_WORK && col.work != null) sh.getRange(row, col.work + 1).clearContent();
       if (CONFIG.WRITE_WORK && col.nightBrk != null) sh.getRange(row, col.nightBrk + 1).clearContent();
+      if (CONFIG.WRITE_HOLIDAY && col.holiday != null) sh.getRange(row, col.holiday + 1).clearContent();
     }
   });
+
+  // 6) 合計行（「出勤日数」ラベルの行）と 小集計表（深夜労働/休日出勤）に集計値を書き込む
+  if (CONFIG.WRITE_TOTALS) {
+    var totalsRowIdx = -1, labelCol = -1;
+    for (var rt = hRow + 1; rt < data.length && totalsRowIdx < 0; rt++) {
+      for (var ct = 0; ct < data[rt].length; ct++) {
+        if (String(data[rt][ct]).replace(/\s/g, "") === "出勤日数") { totalsRowIdx = rt; labelCol = ct; break; }
+      }
+    }
+    if (totalsRowIdx >= 0) {
+      sh.getRange(totalsRowIdx + 1, labelCol + 2).setValue(dayCount);          // 出勤日数（ラベルの右隣）
+      if (col.work != null) setDur_(sh, totalsRowIdx + 1, col.work, totWork, false);
+      if (col.night != null) setDur_(sh, totalsRowIdx + 1, col.night, totNight, true);
+      if (col.holiday != null) setDur_(sh, totalsRowIdx + 1, col.holiday, totHoliday, true);
+    }
+    // 小集計表：「深夜労働」「休日出勤」が横並びの行を合計行より下で探し、1行下に値を入れる
+    var searchFrom = totalsRowIdx >= 0 ? totalsRowIdx + 1 : hRow + 1;
+    for (var rm = searchFrom; rm < data.length; rm++) {
+      for (var cm = 0; cm + 1 < data[rm].length; cm++) {
+        if (String(data[rm][cm]).replace(/\s/g, "") === "深夜労働" &&
+            String(data[rm][cm + 1]).replace(/\s/g, "") === "休日出勤") {
+          setDur_(sh, rm + 2, cm, totNight, true);       // 1行下が値セル
+          setDur_(sh, rm + 2, cm + 1, totHoliday, true);
+          rm = data.length; break;
+        }
+      }
+    }
+  }
 
   return { written: written, month: mk };
 }
