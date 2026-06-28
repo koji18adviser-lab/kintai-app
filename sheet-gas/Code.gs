@@ -13,7 +13,13 @@
  *       深夜休憩時間 = 22時〜翌5時に重なった休憩（深夜帯の空き時間 − 深夜労働）
  *       休日出勤 = 所定休日（既定=土日。HOLIDAY_WEEKDAYS）に働いた日の勤務時間
  *       合計行 = 出勤日数 / 勤務時間 / 深夜労働 / 休日出勤 を自動集計（小集計表も）
- *     ※ 普通残業 / 40H超残業 の列は触りません（会社の計算ルール次第のため手入力／別途）
+ *       残業（普通残業 / 40H超残業）= フレックス清算（月合計）で算出し合計行に入れる
+ *         残業対象 = 平日＋土曜の実働（法定休日=日曜は除外）
+ *         所定総 = STD_DAILY_MIN × 所定労働日数（平日数）
+ *         法定枠 = 40h × 暦日数 ÷ 7
+ *         普通残業 = max(0, min(残業対象, 法定枠) − 所定総)  … 所定超〜法定枠
+ *         40H超残業 = max(0, 残業対象 − 法定枠)              … 法定枠超
+ *       ※実際の支給（45h/25hの定額みなし込み等）は別途。シートは実時間の記録のみ。
  *
  * 設定 (CONFIG):
  *   TZ            … タイムゾーン。日本なら "Asia/Tokyo"
@@ -32,6 +38,9 @@ var CONFIG = {
   WRITE_HOLIDAY: true,     // 休日（HOLIDAY_WEEKDAYS）の勤務時間を「休日出勤」列に入力
   HOLIDAY_WEEKDAYS: [0, 6],// 休日とみなす曜日（0=日,1=月,…,6=土）。所定休日が土日なら [0,6]
   WRITE_TOTALS: true,      // 合計行（出勤日数/勤務時間/深夜労働/休日出勤）と小集計表を自動計算
+  WRITE_OVERTIME: true,    // 残業（普通残業/40H超残業）を月合計で算出し合計行に入れる（フレックス清算）
+  STD_DAILY_MIN: 480,      // 所定労働時間/日（分）。8時間=480
+  LEGAL_HOLIDAY_WD: 0,     // 法定休日の曜日（0=日）。法定休日労働は残業計算から除き休日出勤で別管理
   MONTHLY_FONT_SIZE: 12,   // 月次シートの日別テーブルの文字サイズ（pt）。0/null で変更しない
   CLEAR_EMPTY: true
 };
@@ -208,6 +217,8 @@ function writeMonthly_(ss, sessions, settings) {
         else if (t === "退社時刻" && col.out == null) col.out = c;   // 最初の「退社時刻」
         else if (t === "休憩時間" && col.brk == null) col.brk = c;
         else if (t === "勤務時間" && col.work == null) col.work = c;
+        else if (t === "普通残業" && col.ot1 == null) col.ot1 = c;
+        else if (t === "40H超残業" && col.ot2 == null) col.ot2 = c;
         else if (t === "深夜休憩時間" && col.nightBrk == null) col.nightBrk = c;
         else if (t === "休日出勤" && col.holiday == null) col.holiday = c;
         else if (t === "深夜労働" && col.night == null) col.night = c;
@@ -259,7 +270,7 @@ function writeMonthly_(ss, sessions, settings) {
 
   // 5) 書き込み（同時に合計も集計）
   var written = 0;
-  var totWork = 0, totNight = 0, totHoliday = 0, dayCount = 0;
+  var totWork = 0, totNight = 0, totHoliday = 0, dayCount = 0, sundayWork = 0;
   Object.keys(dayRow).forEach(function (dStr) {
     var d = Number(dStr);
     var row = dayRow[d] + 1; // 1始まり
@@ -289,6 +300,7 @@ function writeMonthly_(ss, sessions, settings) {
         if (isHoliday) { setDur_(sh, row, col.holiday, a.work, true); totHoliday += a.work; }
         else { sh.getRange(row, col.holiday + 1).clearContent(); }
       }
+      if (wd === CONFIG.LEGAL_HOLIDAY_WD) sundayWork += a.work;  // 法定休日(日曜)は残業対象から除く
       totWork += a.work; totNight += a.night; dayCount++;
       written++;
     } else if (CONFIG.CLEAR_EMPTY) {
@@ -314,6 +326,23 @@ function writeMonthly_(ss, sessions, settings) {
       if (col.work != null) setDur_(sh, totalsRowIdx + 1, col.work, totWork, false);
       if (col.night != null) setDur_(sh, totalsRowIdx + 1, col.night, totNight, true);
       if (col.holiday != null) setDur_(sh, totalsRowIdx + 1, col.holiday, totHoliday, true);
+
+      // 残業（フレックス＝月の合計で判定）を合計行に入れる
+      if (CONFIG.WRITE_OVERTIME) {
+        var dim = new Date(Date.UTC(year, month, 0)).getUTCDate();             // 当月の暦日数
+        var shomeiDays = 0;
+        for (var dd = 1; dd <= dim; dd++) {
+          var w = new Date(mk + "-" + ("0" + dd).slice(-2) + "T12:00:00Z").getUTCDay();
+          if (CONFIG.HOLIDAY_WEEKDAYS.indexOf(w) < 0) shomeiDays++;            // 所定労働日（土日以外）
+        }
+        var shoteiMin = CONFIG.STD_DAILY_MIN * shomeiDays;                     // 当月の所定総労働時間
+        var houteiMin = Math.floor(2400 * dim / 7);                           // 法定枠 40h×暦日/7
+        var otBase = totWork - sundayWork;                                    // 残業対象（法定休日=日曜を除く）
+        var futsuOT = Math.max(0, Math.min(otBase, houteiMin) - shoteiMin);   // 普通残業（所定超〜法定枠）
+        var over40 = Math.max(0, otBase - houteiMin);                         // 40H超残業（法定枠超）
+        if (col.ot1 != null) setDur_(sh, totalsRowIdx + 1, col.ot1, futsuOT, true);
+        if (col.ot2 != null) setDur_(sh, totalsRowIdx + 1, col.ot2, over40, true);
+      }
     }
     // 小集計表：「深夜労働」「休日出勤」が横並びの行を合計行より下で探し、1行下に値を入れる
     var searchFrom = totalsRowIdx >= 0 ? totalsRowIdx + 1 : hRow + 1;
