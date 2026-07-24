@@ -352,6 +352,63 @@ function nightMin(s){
 function openSession(){ return liveSessions().find(s=>!s.end); }
 function isBreak(s){ return s.type==="break"; }
 
+// ---------- 業務日・区間演算（シートと一致させるための計算） ----------
+// 午前5時を1日の境目にする（深夜に日をまたいだ勤務は前日扱い）
+const DAY_CUTOFF_HOUR=5;
+function bizDayKey(iso){ const d=new Date(iso); d.setHours(d.getHours()-DAY_CUTOFF_HOUR);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+// 重なり合う区間を結合（{s,e} ミリ秒）
+function mergeIv(list){
+  const a=list.filter(x=>x.e>x.s).sort((p,q)=>p.s-q.s), out=[];
+  a.forEach(x=>{ const last=out[out.length-1];
+    if(last && x.s<=last.e){ if(x.e>last.e) last.e=x.e; } else out.push({s:x.s,e:x.e}); });
+  return out;
+}
+// base区間から cut区間を差し引く
+function subIv(base, cut){
+  let res=base.map(x=>({s:x.s,e:x.e}));
+  cut.forEach(c=>{ const next=[];
+    res.forEach(x=>{
+      if(c.e<=x.s || c.s>=x.e){ next.push(x); return; }   // 重なりなし
+      if(c.s>x.s) next.push({s:x.s, e:Math.min(c.s,x.e)}); // 左側の残り
+      if(c.e<x.e) next.push({s:Math.max(c.e,x.s), e:x.e}); // 右側の残り
+    });
+    res=next;
+  });
+  return res.filter(x=>x.e>x.s);
+}
+function totalMinIv(iv){ let t=0; iv.forEach(x=>t+=(x.e-x.s)/60000); return t; }
+// 任意区間[a,b]（ミリ秒）と深夜帯の重なり(分)
+function nightMinIv(a,b){
+  const ns=settings.nightStart, ne=settings.nightEnd; let total=0;
+  let cursor=new Date(a); cursor.setHours(0,0,0,0); cursor.setDate(cursor.getDate()-1);
+  const limit=new Date(b); limit.setHours(0,0,0,0); limit.setDate(limit.getDate()+1);
+  while(cursor<=limit){
+    const w1=new Date(cursor); w1.setHours(ns,0,0,0);
+    const w2=new Date(cursor); w2.setDate(w2.getDate()+1); w2.setHours(ne,0,0,0);
+    const s=Math.max(a, w1.getTime()), e=Math.min(b, w2.getTime());
+    if(e>s) total+=(e-s)/60000;
+    cursor.setDate(cursor.getDate()+1);
+  }
+  return total;
+}
+// 1日分の集計：実働＝勤務区間−休憩区間、休憩＝(退社−出社)−実働（空き時間も休憩に含める）
+function dayAgg(items){
+  const work=[], brk=[];
+  items.forEach(s=>{ if(!s.end)return; const iv={s:new Date(s.start).getTime(), e:new Date(s.end).getTime()};
+    if(isBreak(s)) brk.push(iv); else work.push(iv); });
+  const workN=mergeIv(work), brkN=mergeIv(brk);
+  if(!workN.length) return {work:0, night:0, brk:0, nightBrk:0, firstIn:null, lastOut:null};
+  const eff=subIv(workN, brkN);                    // 実働区間
+  const firstIn=workN[0].s, lastOut=workN[workN.length-1].e;
+  const span=(lastOut-firstIn)/60000;              // 退社−出社
+  const workMin=totalMinIv(eff);                   // 実働（勤務時間）
+  const nightWork=eff.reduce((t,x)=>t+nightMinIv(x.s,x.e),0);
+  const brkMin=Math.max(0, span-workMin);          // 休憩（空き時間込み）
+  const nightBrk=Math.max(0, nightMinIv(firstIn,lastOut)-nightWork);
+  return {work:workMin, night:nightWork, brk:brkMin, nightBrk, firstIn, lastOut};
+}
+
 // ---------- 打刻 ----------
 function tickClock(){
   const d=new Date();
@@ -380,15 +437,14 @@ function renderPunch(){
     bbtn.style.display="none";
     st.textContent="現在は勤務外です";
   }
-  // 今日の打刻
-  const tk=dayKey(new Date().toISOString());
-  const todays=liveSessions().filter(s=>dayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
+  // 今日の打刻（午前5時境目）
+  const tk=bizDayKey(new Date().toISOString());
+  const todays=liveSessions().filter(s=>bizDayKey(s.start)===tk).sort((a,b)=>new Date(a.start)-new Date(b.start));
   const box=$("todaySessions");
   if(!todays.length){ box.innerHTML=`<div class="empty">まだ打刻がありません</div>`; $("todayTotal").textContent=""; return; }
-  let tot=0, brk=0;
+  const ag=dayAgg(todays);
   box.innerHTML=todays.map(s=>{
     const br=isBreak(s);
-    if(br){ brk+=durMin(s); } else { tot+=durMin(s); }
     const nm=br?0:nightMin(s);
     const openTag = br?'<span class="tag break">休憩中</span>':'<span class="tag open">勤務中</span>';
     return `<div class="sess">
@@ -398,7 +454,7 @@ function renderPunch(){
       ${nm>0?`<span class="tag night">深夜${fmtH(nm)}</span>`:""}
       <span class="dur">${s.end?fmtH(durMin(s)):""}</span></div>`;
   }).join("");
-  $("todayTotal").textContent=`勤務 ${fmtH(tot)}${brk>0?` / 休憩 ${fmtH(brk)}`:""}`;
+  $("todayTotal").textContent=`勤務 ${fmtH(ag.work)}${ag.brk>0?` / 休憩 ${fmtH(ag.brk)}`:""}`;
 }
 $("mainBtn").onclick=()=>{
   const open=openSession();
@@ -426,14 +482,14 @@ $("breakBtn").onclick=()=>{
 // ---------- 記録・修正 ----------
 function groupByDay(list){
   const m={};
-  list.forEach(s=>{ const k=dayKey(s.start); (m[k]=m[k]||[]).push(s); });
+  list.forEach(s=>{ const k=bizDayKey(s.start); (m[k]=m[k]||[]).push(s); });
   return Object.keys(m).sort((a,b)=>b<a?-1:1).map(k=>({key:k, items:m[k].sort((a,b)=>new Date(a.start)-new Date(b.start))}));
 }
 function renderRecords(){
   const box=$("recordsList");
   if(!liveSessions().length){ box.innerHTML=`<div class="empty">記録がありません</div>`; return; }
   box.innerHTML=groupByDay(liveSessions()).map(g=>{
-    let tot=0,nt=0,brk=0; g.items.forEach(s=>{ if(isBreak(s)){brk+=durMin(s);} else {tot+=durMin(s);nt+=nightMin(s);} });
+    const ag=dayAgg(g.items); const tot=ag.work, nt=ag.night, brk=ag.brk;
     const rows=g.items.map(s=>{ const br=isBreak(s);
       return `<div class="sess" data-id="${s.id}" style="cursor:pointer">
         ${br?'<span class="tag break">休憩</span>':''}
@@ -502,12 +558,14 @@ function monthKey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
 function renderReport(){
   $("curMonth").textContent=`${viewMonth.getFullYear()}年 ${viewMonth.getMonth()+1}月`;
   const mk=monthKey(viewMonth);
-  const inMonth=liveSessions().filter(s=>monthKey(new Date(s.start))===mk && s.end && !isBreak(s));
+  // 午前5時境目の業務日で月を判定。休憩も含めて集計に渡す
+  const inMonth=liveSessions().filter(s=>s.end && bizDayKey(s.start).slice(0,7)===mk);
 
-  // 日別（休憩は勤務・深夜に含めない）
+  // 日別：実働＝勤務−休憩、休憩＝(退社−出社)−実働（シートと一致）
+  const groups={};
+  inMonth.forEach(s=>{ const k=bizDayKey(s.start); (groups[k]=groups[k]||[]).push(s); });
   const days={};
-  inMonth.forEach(s=>{ const k=dayKey(s.start);
-    days[k]=days[k]||{work:0,night:0}; days[k].work+=durMin(s); days[k].night+=nightMin(s); });
+  Object.keys(groups).forEach(k=>{ const ag=dayAgg(groups[k]); days[k]={work:ag.work, night:ag.night}; });
   const dkeys=Object.keys(days).sort();
 
   let totWork=0, totNight=0;
