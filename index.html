@@ -197,6 +197,20 @@
       <button class="btn" id="wovr_add" style="width:100%;margin-top:8px;">この改定を追加</button>
     </div>
     <div class="card">
+      <div class="sectitle">控除・手取り</div>
+      <label>控除額（円）＝いちばん最初（基準）の控除</label>
+      <input type="number" id="s_deduction" placeholder="給与明細の控除合計（社会保険＋税）">
+      <div class="hint">給与明細の「控除合計」（健康保険＋厚生年金＋雇用保険＋所得税＋住民税など）を入力。手取り＝想定総支給−この控除額で表示されます。空欄なら手取りは表示されません。</div>
+      <div class="sectitle" style="margin-top:14px;">控除の改定履歴</div>
+      <div class="hint" style="margin-top:0">控除額が変わった月を登録すると、その月以降の手取りは新しい控除で計算されます。登録していない過去の月は上の「基準の控除」のままです。</div>
+      <div id="deductOvrList"></div>
+      <div class="grid2" style="margin-top:10px;">
+        <div><label>適用開始月</label><input type="month" id="dovr_from"></div>
+        <div><label>新しい控除額（円）</label><input type="number" id="dovr_deduction" placeholder="控除合計"></div>
+      </div>
+      <button class="btn" id="dovr_add" style="width:100%;margin-top:8px;">この改定を追加</button>
+    </div>
+    <div class="card">
       <div class="sectitle">割増率</div>
       <div class="grid2">
         <div><label>残業 60h以内（倍）</label><input type="number" step="0.01" id="s_otRate" placeholder="1.25"></div>
@@ -306,10 +320,11 @@ let sessions = load(LS_SESS, []);   // [{id, start(ISO), end(ISO|null)}]
 let settings = Object.assign({
   gross:0, wage:0, otRate:1.25, otRate2:1.5, nightRate:0.25,
   weeklyStd:40, monthlyStd:0, fixedOt:0, fixedNight:0,
-  nightStart:22, nightEnd:5, grossOverrides:[], wageOverrides:[]
+  nightStart:22, nightEnd:5, grossOverrides:[], wageOverrides:[], deduction:0, deductionOverrides:[]
 }, load(LS_SET, {}));
 if(!Array.isArray(settings.grossOverrides)) settings.grossOverrides=[];
 if(!Array.isArray(settings.wageOverrides)) settings.wageOverrides=[];
+if(!Array.isArray(settings.deductionOverrides)) settings.deductionOverrides=[];
 // その月に適用される月給を返す（改定履歴を考慮）。mk="YYYY-MM"
 function grossForMonth(mk){
   let g=settings.gross;
@@ -323,6 +338,13 @@ function wageForMonth(mk){
   settings.wageOverrides.slice().sort((a,b)=>a.from<b.from?-1:1)
     .forEach(o=>{ if(o.from && mk>=o.from) w=o.wage; });
   return w;
+}
+// その月に適用される控除額を返す（改定履歴を考慮）
+function deductionForMonth(mk){
+  let d=settings.deduction;
+  settings.deductionOverrides.slice().sort((a,b)=>a.from<b.from?-1:1)
+    .forEach(o=>{ if(o.from && mk>=o.from) d=o.deduction; });
+  return d;
 }
 let viewMonth = new Date(); viewMonth.setDate(1);
 
@@ -626,6 +648,9 @@ function renderReport(){
   const otPay = (otPaid125*w*settings.otRate)+(otPaid150*w*settings.otRate2);
   const nightPay = extraNightH * w * settings.nightRate;
   const totalExtra = otPay+nightPay;
+  const monthDeduct=deductionForMonth(mk);
+  const grossPay=monthGross+totalExtra;
+  const netPay=grossPay-monthDeduct;
 
   $("contractBanner").innerHTML = w>0
     ? `基礎時給 ${yen(w)}／所定(法定総枠) ${capH.toFixed(1)}h（${daysInMonth}日）／みなし残業 ${fOt}h・みなし深夜 ${settings.fixedNight}h で計算中。`
@@ -646,7 +671,9 @@ function renderReport(){
     <div class="stat"><span class="k">深夜割増（追加分）</span><span class="v pay">${yen(nightPay)}</span></div>
     <div class="stat"><span class="k" style="font-weight:700">追加支給 合計</span><span class="v pay" style="font-size:17px">${yen(totalExtra)}</span></div>
     <div class="stat"><span class="k" style="font-weight:700">月給（この月）</span><span class="v pay">${yen(monthGross)}</span></div>
-    <div class="stat"><span class="k" style="font-weight:700">想定総支給（月給＋追加）</span><span class="v pay" style="font-size:17px">${yen(monthGross+totalExtra)}</span></div>`;
+    <div class="stat"><span class="k" style="font-weight:700">想定総支給（月給＋追加）</span><span class="v pay" style="font-size:17px">${yen(grossPay)}</span></div>
+    <div class="stat"><span class="k">控除（この月）</span><span class="v" style="color:var(--sub)">${monthDeduct>0?"－"+yen(monthDeduct):"未設定"}</span></div>
+    <div class="stat"><span class="k" style="font-weight:700">手取り（総支給−控除）</span><span class="v pay" style="font-size:17px">${monthDeduct>0?yen(netPay):"—"}</span></div>`;
 
   // 日別テーブル
   const t=$("dailyTable");
@@ -684,8 +711,10 @@ function fillSettings(){
   $("s_fixedNight").value=settings.fixedNight;
   $("s_nightStart").value=settings.nightStart;
   $("s_nightEnd").value=settings.nightEnd;
+  $("s_deduction").value=settings.deduction||"";
   renderGrossOvr();
   renderWageOvr();
+  renderDeductOvr();
 }
 function renderGrossOvr(){
   const box=$("grossOvrList"); if(!box) return;
@@ -739,6 +768,32 @@ $("wovr_add").onclick=()=>{
   $("wovr_from").value=""; $("wovr_wage").value="";
   renderWageOvr(); renderAll(); alert("改定を追加しました");
 };
+function renderDeductOvr(){
+  const box=$("deductOvrList"); if(!box) return;
+  const list=settings.deductionOverrides.slice().sort((a,b)=>a.from<b.from?-1:1);
+  if(!list.length){ box.innerHTML=`<div class="hint" style="margin:6px 0 0">まだ改定履歴はありません（基準の控除がずっと適用されます）。</div>`; return; }
+  box.innerHTML=list.map(o=>{
+    const [y,m]=o.from.split("-");
+    return `<div class="row" style="align-items:center;gap:10px;margin-top:8px;">
+      <span style="flex:1">${y}年${+m}月〜　<b>${yen(o.deduction)}</b></span>
+      <button class="btn ghost" data-dovr="${o.from}" style="padding:6px 10px;">削除</button>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-dovr]").forEach(b=>b.onclick=()=>{
+    settings.deductionOverrides=settings.deductionOverrides.filter(o=>o.from!==b.dataset.dovr);
+    settings.mod=nowMs(); save(LS_SET,settings); scheduleSync(); renderDeductOvr(); renderAll();
+  });
+}
+$("dovr_add").onclick=()=>{
+  const from=$("dovr_from").value, dd=+$("dovr_deduction").value||0;
+  if(!from){ alert("適用開始月を選んでください"); return; }
+  if(!dd){ alert("新しい控除額を入力してください"); return; }
+  settings.deductionOverrides=settings.deductionOverrides.filter(o=>o.from!==from);
+  settings.deductionOverrides.push({from, deduction:dd});
+  settings.mod=nowMs(); save(LS_SET,settings); scheduleSync();
+  $("dovr_from").value=""; $("dovr_deduction").value="";
+  renderDeductOvr(); renderAll(); alert("改定を追加しました");
+};
 $("saveSettings").onclick=()=>{
   settings={ gross:+$("s_gross").value||0, wage:+$("s_wage").value||0,
     otRate:+$("s_otRate").value||1.25, otRate2:+$("s_otRate2").value||1.5,
@@ -746,7 +801,9 @@ $("saveSettings").onclick=()=>{
     monthlyStd:+$("s_monthlyStd").value||0,
     fixedOt:+$("s_fixedOt").value||0, fixedNight:+$("s_fixedNight").value||0,
     nightStart:+$("s_nightStart").value||22, nightEnd:+$("s_nightEnd").value||5,
-    grossOverrides:settings.grossOverrides||[], wageOverrides:settings.wageOverrides||[], mod:nowMs() };
+    deduction:+$("s_deduction").value||0,
+    grossOverrides:settings.grossOverrides||[], wageOverrides:settings.wageOverrides||[],
+    deductionOverrides:settings.deductionOverrides||[], mod:nowMs() };
   save(LS_SET,settings); scheduleSync(); renderAll(); alert("設定を保存しました");
 };
 function downloadFile(name,content,type){
