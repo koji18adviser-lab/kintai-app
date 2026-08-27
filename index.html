@@ -187,6 +187,16 @@
       <button class="btn" id="ovr_add" style="width:100%;margin-top:8px;">この改定を追加</button>
     </div>
     <div class="card">
+      <div class="sectitle">基礎時給の改定履歴</div>
+      <div class="hint" style="margin-top:0">基礎時給が変わった月を登録すると、その月以降の残業代・深夜割増は新しい時給で計算されます。登録していない過去の月は上の「基準の基礎時給」のままなので、7月以前の数字は変わりません。</div>
+      <div id="wageOvrList"></div>
+      <div class="grid2" style="margin-top:10px;">
+        <div><label>適用開始月</label><input type="month" id="wovr_from"></div>
+        <div><label>新しい基礎時給（円）</label><input type="number" step="0.01" id="wovr_wage" placeholder="例: 1779"></div>
+      </div>
+      <button class="btn" id="wovr_add" style="width:100%;margin-top:8px;">この改定を追加</button>
+    </div>
+    <div class="card">
       <div class="sectitle">割増率</div>
       <div class="grid2">
         <div><label>残業 60h以内（倍）</label><input type="number" step="0.01" id="s_otRate" placeholder="1.25"></div>
@@ -296,15 +306,23 @@ let sessions = load(LS_SESS, []);   // [{id, start(ISO), end(ISO|null)}]
 let settings = Object.assign({
   gross:0, wage:0, otRate:1.25, otRate2:1.5, nightRate:0.25,
   weeklyStd:40, monthlyStd:0, fixedOt:0, fixedNight:0,
-  nightStart:22, nightEnd:5, grossOverrides:[]
+  nightStart:22, nightEnd:5, grossOverrides:[], wageOverrides:[]
 }, load(LS_SET, {}));
 if(!Array.isArray(settings.grossOverrides)) settings.grossOverrides=[];
+if(!Array.isArray(settings.wageOverrides)) settings.wageOverrides=[];
 // その月に適用される月給を返す（改定履歴を考慮）。mk="YYYY-MM"
 function grossForMonth(mk){
   let g=settings.gross;
   settings.grossOverrides.slice().sort((a,b)=>a.from<b.from?-1:1)
     .forEach(o=>{ if(o.from && mk>=o.from) g=o.gross; });
   return g;
+}
+// その月に適用される基礎時給を返す（改定履歴を考慮）
+function wageForMonth(mk){
+  let w=settings.wage;
+  settings.wageOverrides.slice().sort((a,b)=>a.from<b.from?-1:1)
+    .forEach(o=>{ if(o.from && mk>=o.from) w=o.wage; });
+  return w;
 }
 let viewMonth = new Date(); viewMonth.setDate(1);
 
@@ -603,7 +621,7 @@ function renderReport(){
 
   const extraNightH=Math.max(0, nightH-settings.fixedNight);
 
-  const w=settings.wage;
+  const w=wageForMonth(mk);
   const monthGross=grossForMonth(mk);
   const otPay = (otPaid125*w*settings.otRate)+(otPaid150*w*settings.otRate2);
   const nightPay = extraNightH * w * settings.nightRate;
@@ -667,6 +685,7 @@ function fillSettings(){
   $("s_nightStart").value=settings.nightStart;
   $("s_nightEnd").value=settings.nightEnd;
   renderGrossOvr();
+  renderWageOvr();
 }
 function renderGrossOvr(){
   const box=$("grossOvrList"); if(!box) return;
@@ -694,6 +713,32 @@ $("ovr_add").onclick=()=>{
   $("ovr_from").value=""; $("ovr_gross").value="";
   renderGrossOvr(); renderAll(); alert("改定を追加しました");
 };
+function renderWageOvr(){
+  const box=$("wageOvrList"); if(!box) return;
+  const list=settings.wageOverrides.slice().sort((a,b)=>a.from<b.from?-1:1);
+  if(!list.length){ box.innerHTML=`<div class="hint" style="margin:6px 0 0">まだ改定履歴はありません（基準の基礎時給がずっと適用されます）。</div>`; return; }
+  box.innerHTML=list.map(o=>{
+    const [y,m]=o.from.split("-");
+    return `<div class="row" style="align-items:center;gap:10px;margin-top:8px;">
+      <span style="flex:1">${y}年${+m}月〜　<b>${yen(o.wage)}</b></span>
+      <button class="btn ghost" data-wovr="${o.from}" style="padding:6px 10px;">削除</button>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-wovr]").forEach(b=>b.onclick=()=>{
+    settings.wageOverrides=settings.wageOverrides.filter(o=>o.from!==b.dataset.wovr);
+    settings.mod=nowMs(); save(LS_SET,settings); scheduleSync(); renderWageOvr(); renderAll();
+  });
+}
+$("wovr_add").onclick=()=>{
+  const from=$("wovr_from").value, wg=+$("wovr_wage").value||0;
+  if(!from){ alert("適用開始月を選んでください"); return; }
+  if(!wg){ alert("新しい基礎時給を入力してください"); return; }
+  settings.wageOverrides=settings.wageOverrides.filter(o=>o.from!==from);
+  settings.wageOverrides.push({from, wage:wg});
+  settings.mod=nowMs(); save(LS_SET,settings); scheduleSync();
+  $("wovr_from").value=""; $("wovr_wage").value="";
+  renderWageOvr(); renderAll(); alert("改定を追加しました");
+};
 $("saveSettings").onclick=()=>{
   settings={ gross:+$("s_gross").value||0, wage:+$("s_wage").value||0,
     otRate:+$("s_otRate").value||1.25, otRate2:+$("s_otRate2").value||1.5,
@@ -701,7 +746,7 @@ $("saveSettings").onclick=()=>{
     monthlyStd:+$("s_monthlyStd").value||0,
     fixedOt:+$("s_fixedOt").value||0, fixedNight:+$("s_fixedNight").value||0,
     nightStart:+$("s_nightStart").value||22, nightEnd:+$("s_nightEnd").value||5,
-    grossOverrides:settings.grossOverrides||[], mod:nowMs() };
+    grossOverrides:settings.grossOverrides||[], wageOverrides:settings.wageOverrides||[], mod:nowMs() };
   save(LS_SET,settings); scheduleSync(); renderAll(); alert("設定を保存しました");
 };
 function downloadFile(name,content,type){
